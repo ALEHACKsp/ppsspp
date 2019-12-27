@@ -199,6 +199,7 @@ struct IoAsyncParams {
 
 static IoAsyncParams asyncParams[PSP_COUNT_FDS];
 static HLEHelperThread *asyncThreads[PSP_COUNT_FDS]{};
+static int asyncDefaultPriority = -1;
 
 class FileNode : public KernelObject {
 public:
@@ -662,7 +663,7 @@ void __IoInit() {
 }
 
 void __IoDoState(PointerWrap &p) {
-	auto s = p.Section("sceIo", 1, 4);
+	auto s = p.Section("sceIo", 1, 5);
 	if (!s)
 		return;
 
@@ -697,30 +698,35 @@ void __IoDoState(PointerWrap &p) {
 	}
 
 	for (int i = 0; i < PSP_COUNT_FDS; ++i) {
+		auto clearThread = [&]() {
+			if (asyncThreads[i])
+				asyncThreads[i]->Forget();
+			delete asyncThreads[i];
+			asyncThreads[i] = nullptr;
+		};
+
 		if (s >= 4) {
 			p.DoVoid(&asyncParams[i], (int)sizeof(IoAsyncParams));
 			bool hasThread = asyncThreads[i] != nullptr;
 			p.Do(hasThread);
 			if (hasThread) {
-				if (asyncThreads[i])
-					asyncThreads[i]->Forget();
-				delete asyncThreads[i];
-				asyncThreads[i] = nullptr;
+				if (p.GetMode() == p.MODE_READ)
+					clearThread();
 				p.DoClass(asyncThreads[i]);
 			} else if (!hasThread) {
-				if (asyncThreads[i])
-					asyncThreads[i]->Forget();
-				delete asyncThreads[i];
-				asyncThreads[i] = nullptr;
+				clearThread();
 			}
 		} else {
 			asyncParams[i].op = IoAsyncOp::NONE;
 			asyncParams[i].priority = -1;
-			if (asyncThreads[i])
-				asyncThreads[i]->Forget();
-			delete asyncThreads[i];
-			asyncThreads[i] = nullptr;
+			clearThread();
 		}
+	}
+
+	if (s >= 5) {
+		p.Do(asyncDefaultPriority);
+	} else {
+		asyncDefaultPriority = -1;
 	}
 }
 
@@ -739,6 +745,7 @@ void __IoShutdown() {
 		delete asyncThreads[i];
 		asyncThreads[i] = nullptr;
 	}
+	asyncDefaultPriority = -1;
 
 	pspFileSystem.Unmount("ms0:", memstickSystem);
 	pspFileSystem.Unmount("fatms0:", memstickSystem);
@@ -772,7 +779,9 @@ u32 __IoGetFileHandleFromId(u32 id, u32 &outError)
 
 static void IoStartAsyncThread(int id, FileNode *f) {
 	IoAsyncCleanupThread(id, true);
-	int priority = asyncParams[id].priority == -1 ? KernelCurThreadPriority() : asyncParams[id].priority;
+	int priority = asyncParams[id].priority == -1 ? asyncDefaultPriority : asyncParams[id].priority;
+	if (priority == -1)
+		priority = KernelCurThreadPriority();
 	asyncThreads[id] = new HLEHelperThread("SceIoAsync", "IoFileMgrForUser", "__IoAsyncFinish", priority, 0x200);
 	asyncThreads[id]->Start(id, 0);
 	f->pendingAsyncResult = true;
@@ -1961,6 +1970,11 @@ static int sceIoChangeAsyncPriority(int id, int priority) {
 	// priority = -1 is valid
 	if (priority != -1 && (priority < 0x08 || priority > 0x77)) {
 		return hleLogError(SCEIO, SCE_KERNEL_ERROR_ILLEGAL_PRIORITY, "illegal priority %d", priority);
+	}
+
+	if (id == -1) {
+		asyncDefaultPriority = priority;
+		return hleLogSuccessI(SCEIO, 0);
 	}
 
 	u32 error;
