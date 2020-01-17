@@ -128,6 +128,7 @@ public:
 	// If not set, will use the "best" device.
 	std::string sVulkanDevice;
 	std::string sD3D11Device;  // Windows only
+	std::string sCameraDevice;
 
 	bool bSoftwareRendering;
 	bool bHardwareTransform; // only used in the GLES backend
