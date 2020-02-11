@@ -288,6 +288,11 @@ bool TouchControlLayoutScreen::touch(const TouchInput &touch) {
 			float diffX = (touch.x - startX_);
 			float diffY = -(touch.y - startY_);
 
+			// Snap to grid
+			if (g_Config.bTouchSnapToGrid) {
+					diffX -= (int)(touch.x - startX_) % (g_Config.iTouchSnapGridSize/2);
+					diffY += (int)(touch.y - startY_) % (g_Config.iTouchSnapGridSize/2);
+			}
 			float movementScale = 0.02f;
 			float newScale = startScale_ + diffY * movementScale; 
 			float newSpacing = startSpacing_ + diffX * movementScale;
@@ -351,8 +356,8 @@ void TouchControlLayoutScreen::CreateViews() {
 
 	using namespace UI;
 
-	I18NCategory *co = GetI18NCategory("Controls");
-	I18NCategory *di = GetI18NCategory("Dialog");
+	auto co = GetI18NCategory("Controls");
+	auto di = GetI18NCategory("Dialog");
 
 	root_ = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
 
@@ -363,7 +368,7 @@ void TouchControlLayoutScreen::CreateViews() {
 	// 	->OnChange.Handle(this, &GameSettingsScreen::OnChangeControlScaling);
 
 	CheckBox *snap = new CheckBox(&g_Config.bTouchSnapToGrid, di->T("Snap"), "", new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 228));
-	PopupSliderChoice *gridSize = new PopupSliderChoice(&g_Config.iTouchSnapGridSize, 1, 256, di->T("Grid"), screenManager(), "", new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 158));
+	PopupSliderChoice *gridSize = new PopupSliderChoice(&g_Config.iTouchSnapGridSize, 2, 256, di->T("Grid"), screenManager(), "", new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 158));
 	gridSize->SetEnabledPtr(&g_Config.bTouchSnapToGrid);
 
 	mode_ = new ChoiceStrip(ORIENT_VERTICAL, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 140 + 158 + 64 + 10));
@@ -390,7 +395,7 @@ void TouchControlLayoutScreen::CreateViews() {
 	// serves no other purpose.
 	AnchorLayout *controlsHolder = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
 
-	I18NCategory *ms = GetI18NCategory("MainSettings");
+	auto ms = GetI18NCategory("MainSettings");
 
 	//tabHolder->AddTab(ms->T("Controls"), controlsHolder);
 
@@ -446,6 +451,12 @@ void TouchControlLayoutScreen::CreateViews() {
 		DragDropButton *speed2 = new DragDropButton(g_Config.touchSpeed2Key, rectImage, I_ARROW);
 		speed2->SetAngle(190.0f, 180.0f);
 		controls_.push_back(speed2);
+	}
+
+	if (g_Config.touchRapidFireKey.show) {
+		DragDropButton *rapidFire = new DragDropButton(g_Config.touchRapidFireKey, rectImage, I_ARROW);
+		rapidFire->SetAngle(90.0f, 180.0f);
+		controls_.push_back(rapidFire);
 	}
 
 	if (g_Config.touchLKey.show) {

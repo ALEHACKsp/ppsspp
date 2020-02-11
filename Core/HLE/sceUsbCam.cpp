@@ -59,12 +59,15 @@ void __UsbCamDoState(PointerWrap &p) {
 
 	p.Do(*config);
 	if (config->mode == Camera::Mode::Video) { // stillImage? TBD
+		Camera::stopCapture();
 		Camera::startCapture();
 	}
 }
 
 void __UsbCamShutdown() {
-	Camera::stopCapture();
+	if (config->mode == Camera::Mode::Video) { // stillImage? TBD
+		Camera::stopCapture();
+	}
 	delete[] videoBuffer;
 	videoBuffer = nullptr;
 	delete[] config;
@@ -151,9 +154,21 @@ static int sceUsbCamSetupVideoEx(u32 paramAddr, u32 workareaAddr, int wasize) {
 
 static int sceUsbCamStartVideo() {
 	std::lock_guard<std::mutex> lock(videoBufferMutex);
-	videoBufferLength = sizeof(sceUsbCamDummyImage);
+
+	int width, height;
+	getCameraResolution(config->type, &width, &height);
+
+	unsigned char* jpegData = nullptr;
+	int jpegLen = 0;
+	__cameraDummyImage(width, height, &jpegData, &jpegLen);
+	videoBufferLength = jpegLen;
 	memset(videoBuffer, 0, VIDEO_BUFFER_SIZE);
-	memcpy(videoBuffer, sceUsbCamDummyImage, sizeof(sceUsbCamDummyImage));
+	if (jpegData) {
+		memcpy(videoBuffer, jpegData, jpegLen);
+		free(jpegData);
+		jpegData = nullptr;
+	}
+
 	Camera::startCapture();
 	return 0;
 }
@@ -205,8 +220,18 @@ static int sceUsbCamSetupStillEx(u32 paramAddr) {
 	return 0;
 }
 
-static int sceUsbCamAutoImageReverseSW(int rev) {
-	INFO_LOG(HLE, "UNIMPL sceUsbCamAutoImageReverseSW");
+static int sceUsbCamAutoImageReverseSW(int on) {
+	INFO_LOG(HLE, "UNIMPL sceUsbCamAutoImageReverseSW: %d", on);
+	return 0;
+}
+
+static int sceUsbCamGetLensDirection() {
+	INFO_LOG(HLE, "UNIMPL sceUsbCamGetLensDirection");
+	return 0;
+}
+
+static int sceUsbCamSetReverseMode(int reverseflags) {
+	INFO_LOG(HLE, "UNIMPL sceUsbCamSetReverseMode %d", reverseflags);
 	return 0;
 }
 
@@ -244,7 +269,7 @@ const HLEFunction sceUsbCam[] =
 
 	{ 0XF93C4669, &WrapI_I<sceUsbCamAutoImageReverseSW>,      "sceUsbCamAutoImageReverseSW",             'i', "i" },
 	{ 0X11A1F128, nullptr,                                    "sceUsbCamGetAutoImageReverseState",       '?', "" },
-	{ 0X4C34F553, nullptr,                                    "sceUsbCamGetLensDirection",               '?', "" },
+	{ 0X4C34F553, &WrapI_V<sceUsbCamGetLensDirection>,        "sceUsbCamGetLensDirection",               'i', "" },
 
 	{ 0X383E9FA8, nullptr,                                    "sceUsbCamGetSaturation",                  '?', "" },
 	{ 0X6E205974, nullptr,                                    "sceUsbCamSetSaturation",                  '?', "" },
@@ -259,7 +284,7 @@ const HLEFunction sceUsbCam[] =
 	{ 0X2BCD50C0, nullptr,                                    "sceUsbCamGetEvLevel",                     '?', "" },
 	{ 0X1D686870, nullptr,                                    "sceUsbCamSetEvLevel",                     '?', "" },
 	{ 0XD5279339, nullptr,                                    "sceUsbCamGetReverseMode",                 '?', "" },
-	{ 0X951BEDF5, nullptr,                                    "sceUsbCamSetReverseMode",                 '?', "" },
+	{ 0X951BEDF5, &WrapI_I<sceUsbCamSetReverseMode>,          "sceUsbCamSetReverseMode",                 'i', "i" },
 	{ 0X9E8AAF8D, nullptr,                                    "sceUsbCamGetZoom",                        '?', "" },
 	{ 0XC484901F, nullptr,                                    "sceUsbCamSetZoom",                        '?', "" },
 	{ 0XAA7D94BA, nullptr,                                    "sceUsbCamGetAntiFlicker",                 '?', "" },
@@ -275,12 +300,16 @@ void Register_sceUsbCam()
 }
 
 std::vector<std::string> Camera::getDeviceList() {
-	#if PPSSPP_PLATFORM(LINUX) && !PPSSPP_PLATFORM(ANDROID)
-		return __v4l_getDeviceList();
-	#elif defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
+	#if defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
 		if (winCamera) {
 			return winCamera->getDeviceList();
 		}
+	#elif PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(IOS)
+		return __cameraGetDeviceList();
+	#elif defined(USING_QT_UI) // Qt:macOS / Qt:Linux
+		return __qt_getDeviceList();
+	#elif PPSSPP_PLATFORM(LINUX) // SDL:Linux
+		return __v4l_getDeviceList();
 	#endif
 	return std::vector<std::string>();
 }
@@ -291,19 +320,22 @@ int Camera::startCapture() {
 	INFO_LOG(HLE, "%s resolution: %dx%d", __FUNCTION__, width, height);
 
 	config->mode = Camera::Mode::Video;
-	#if PPSSPP_PLATFORM(ANDROID)
-		System_SendMessage("camera_command", "startVideo");
-	#elif PPSSPP_PLATFORM(LINUX)
-		__v4l_startCapture(width, height);
-	#elif defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
+	#if defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
 		if (winCamera) {
 			if (winCamera->isShutDown()) {
 				delete winCamera;
 				winCamera = new WindowsCaptureDevice(CAPTUREDEVIDE_TYPE::VIDEO);
 				winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::INITIALIZE, nullptr });
 			}
-			winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::START, nullptr });
+			void* resolution = static_cast<void*>(new std::vector<int>({ width, height }));
+			winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::START, resolution });
 		}
+	#elif PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(IOS) || defined(USING_QT_UI)
+		char command[40] = {0};
+		snprintf(command, sizeof(command), "startVideo_%dx%d", width, height);
+		System_SendMessage("camera_command", command);
+	#elif PPSSPP_PLATFORM(LINUX)
+		__v4l_startCapture(width, height);
 	#else
 		ERROR_LOG(HLE, "%s not implemented", __FUNCTION__);
 	#endif
@@ -312,20 +344,26 @@ int Camera::startCapture() {
 
 int Camera::stopCapture() {
 	INFO_LOG(HLE, "%s", __FUNCTION__);
-	#if PPSSPP_PLATFORM(ANDROID)
+	#if defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
+		if (winCamera) {
+			winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::STOP, nullptr });
+		}
+	#elif PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(IOS) || defined(USING_QT_UI)
 		System_SendMessage("camera_command", "stopVideo");
 	#elif PPSSPP_PLATFORM(LINUX)
 		__v4l_stopCapture();
-	#elif defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
-		if (winCamera) {
-			winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::STOP, nullptr });
-			winCamera->sendMessage({ CAPTUREDEVIDE_COMMAND::SHUTDOWN, nullptr });
-		}
 	#else
 		ERROR_LOG(HLE, "%s not implemented", __FUNCTION__);
 	#endif
 	config->mode = Camera::Mode::Unused;
 	return 0;
+}
+
+void Camera::onCameraDeviceChange() {
+	if (config != nullptr && config->mode == Camera::Mode::Video) {
+		stopCapture();
+		startCapture();
+	}
 }
 
 void Camera::pushCameraImage(long long length, unsigned char* image) {

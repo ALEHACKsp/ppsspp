@@ -160,15 +160,17 @@ public:
 	WindowsCaptureDevice(CAPTUREDEVIDE_TYPE type);
 	~WindowsCaptureDevice();
 
+	static void CheckDevices();
+
 	bool init();
-	bool start();
+	bool start(UINT32 width, UINT32 height);
 	bool stop();
 
 	CAPTUREDEVIDE_ERROR getError() const { return error; }
 	std::string getErrorMessage() const { return errorMessage; }
 	int getDeviceCounts() const { return param.count; }
 	// Get a list contained friendly device name.
-	std::vector<std::string> getDeviceList(int *pActuallCount = nullptr);
+	std::vector<std::string> getDeviceList(bool forceEnum = false, int *pActuallCount = nullptr);
 
 	void setError(const CAPTUREDEVIDE_ERROR &newError, const std::string &newErrorMessage) { error = newError; errorMessage = newErrorMessage; }
 	void setSelction(const UINT32 &selection) { param.selection = selection; }
@@ -179,6 +181,8 @@ public:
 
 	void sendMessage(CAPTUREDEVIDE_MESSAGE message);
 	CAPTUREDEVIDE_MESSAGE getMessage();
+
+	HRESULT enumDevices();
 
 	friend class ReaderCallback;
 
@@ -207,6 +211,9 @@ protected:
 
 // For the shutdown event safety.
 	std::mutex sdMutex;
+
+// Param updating synchronously.
+	std::mutex paramMutex;
 
 // Camera only
 	unsigned char *imageRGB;
