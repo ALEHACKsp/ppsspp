@@ -17,7 +17,6 @@
 
 #include "TouchControlVisibilityScreen.h"
 #include "Core/Config.h"
-#include "UI/ui_atlas.h"
 #include "i18n/i18n.h"
 #include "ComboKeyMappingScreen.h"
 #include "base/colorutil.h"
@@ -25,6 +24,7 @@
 #include "base/timeutil.h"
 #include "file/path.h"
 #include "gfx_es2/draw_buffer.h"
+#include "gfx/texture_atlas.h"
 #include "math/curves.h"
 #include "base/stringutil.h"
 #include "ui/ui_context.h"
@@ -41,11 +41,11 @@ void Combo_keyScreen::CreateViews() {
 	LinearLayout *leftColumn = new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(120, FILL_PARENT));
 	auto di = GetI18NCategory("Dialog");
 
-	static const int comboKeyImages[5] = {
-		I_1, I_2, I_3, I_4, I_5,
+	static const ImageID comboKeyImages[5] = {
+		ImageID("I_1"), ImageID("I_2"), ImageID("I_3"), ImageID("I_4"), ImageID("I_5"),
 	};
 
-	comboselect = new ChoiceStrip(ORIENT_VERTICAL, new AnchorLayoutParams(10, 10,  NONE, NONE));
+	comboselect = new ChoiceStrip(ORIENT_VERTICAL, new AnchorLayoutParams(10, 10, NONE, NONE));
 	comboselect->SetSpacing(10);
 	for (int i = 0; i < 5; i++) {
 		comboselect->AddChoice(comboKeyImages[i]);
@@ -65,39 +65,45 @@ void Combo_keyScreen::CreateViews() {
 	gridsettings.fillCells = true;
 	GridLayout *grid = rightScroll_->Add(new GridLayout(gridsettings, new LayoutParams(FILL_PARENT, WRAP_CONTENT)));
 
+	bool *toggle;
 	memset(array, 0, sizeof(array));
 	switch (*mode) {
 	case 0: 
+		toggle = &g_Config.bComboToggle0;
 		for (int i = 0; i < 16; i++)
 			array[i] = (0x01 == ((g_Config.iCombokey0 >> i) & 0x01));
 		break;
 	case 1:
+		toggle = &g_Config.bComboToggle1;
 		for (int i = 0; i < 16; i++)
 			array[i] = (0x01 == ((g_Config.iCombokey1 >> i) & 0x01));
 		break;
 	case 2:
+		toggle = &g_Config.bComboToggle2;
 		for (int i = 0; i < 16; i++)
 			array[i] = (0x01 == ((g_Config.iCombokey2 >> i) & 0x01));
 		break;
 	case 3:
+		toggle = &g_Config.bComboToggle3;
 		for (int i = 0; i < 16; i++)
 			array[i] = (0x01 == ((g_Config.iCombokey3 >> i) & 0x01));
 		break;
 	case 4:
+		toggle = &g_Config.bComboToggle4;
 		for (int i = 0; i < 16; i++)
 			array[i] = (0x01 == ((g_Config.iCombokey4 >> i) & 0x01));
 		break;
 	}
 
-	std::map<std::string, int> keyImages;
-	keyImages["Circle"] = I_CIRCLE;
-	keyImages["Cross"] = I_CROSS;
-	keyImages["Square"] = I_SQUARE;
-	keyImages["Triangle"] = I_TRIANGLE;
-	keyImages["L"] = I_L;
-	keyImages["R"] = I_R;
-	keyImages["Start"] = I_START;
-	keyImages["Select"] = I_SELECT;
+	std::map<std::string, ImageID> keyImages;
+	keyImages["Circle"] = ImageID("I_CIRCLE");
+	keyImages["Cross"] = ImageID("I_CROSS");
+	keyImages["Square"] = ImageID("I_SQUARE");
+	keyImages["Triangle"] = ImageID("I_TRIANGLE");
+	keyImages["L"] = ImageID("I_L");
+	keyImages["R"] = ImageID("I_R");
+	keyImages["Start"] = ImageID("I_START");
+	keyImages["Select"] = ImageID("I_SELECT");
 	keyToggles["Circle"] = &array[13];
 	keyToggles["Cross"] = &array[14];
 	keyToggles["Square"] = &array[15];
@@ -111,7 +117,7 @@ void Combo_keyScreen::CreateViews() {
 	keyToggles["Start"] = &array[3];
 	keyToggles["Select"] = &array[0];
 
-	std::map<std::string, int>::iterator imageFinder;
+	std::map<std::string, ImageID>::iterator imageFinder;
 
 	auto mc = GetI18NCategory("MappableControls");
 
@@ -138,8 +144,22 @@ void Combo_keyScreen::CreateViews() {
 
 		row->Add(choice);
 		grid->Add(row);
-		
+
 	}
+
+	LinearLayout *row = new LinearLayout(ORIENT_HORIZONTAL, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT));
+	row->SetSpacing(0);
+
+	CheckBox *checkbox = new CheckBox(toggle, "", "", new LinearLayoutParams(50, WRAP_CONTENT));
+	row->Add(checkbox);
+
+	Choice *choice = new Choice(mc->T("Toggle mode"), new LinearLayoutParams(1.0f));
+	ChoiceEventHandler *choiceEventHandler = new ChoiceEventHandler(checkbox);
+	choice->OnClick.Handle(choiceEventHandler, &ChoiceEventHandler::onChoiceClick);
+	choice->SetCentered(true);
+
+	row->Add(choice);
+	grid->Add(row);
 }
 
 static int arrayToInt(bool ary[16]) {

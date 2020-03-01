@@ -485,12 +485,6 @@ add_library(gason STATIC
 	ext/native/ext/gason/gason.h
 )
 
-add_library(rg_etc1 STATIC
-	ext/native/ext/rg_etc1/rg_etc1.cpp
-	ext/native/ext/rg_etc1/rg_etc1.h
-)
-include_directories(ext/native/ext/rg_etc1)
-
 if(USE_FFMPEG)
 	if(NOT FFMPEG_DIR)
 		if(NOT USE_SYSTEM_FFMPEG)
@@ -869,7 +863,6 @@ list(APPEND NativeAppSource
 	UI/CwCheatScreen.cpp
 	UI/InstallZipScreen.cpp
 	UI/ProfilerDraw.cpp
-	UI/ui_atlas.cpp
 	UI/TextureUtil.cpp
 	UI/ComboKeyMappingScreen.cpp
 )
@@ -1082,7 +1075,7 @@ if(ANDROID)
 	set(ATOMIC_LIB atomic)
 endif()
 
-target_link_libraries(native ${LIBZIP_LIBRARY} ${PNG_LIBRARY} ${ZLIB_LIBRARY} rg_etc1 gason udis86 ${RT_LIB} ${nativeExtraLibs} ${ATOMIC_LIB})
+target_link_libraries(native ${LIBZIP_LIBRARY} ${PNG_LIBRARY} ${ZLIB_LIBRARY} gason udis86 ${RT_LIB} ${nativeExtraLibs} ${ATOMIC_LIB})
 if(TARGET Ext::GLEW)
 	target_link_libraries(native Ext::GLEW)
 endif()
@@ -1760,8 +1753,6 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Util/BlockAllocator.h
 	Core/Util/PPGeDraw.cpp
 	Core/Util/PPGeDraw.h
-	Core/Util/ppge_atlas.cpp
-	Core/Util/ppge_atlas.h
 	${CORE_NEON}
 	${GPU_SOURCES}
 	ext/disarm.cpp
@@ -1933,6 +1924,7 @@ endif()
 
 set(NativeAssets
 	android/assets/ui_atlas.zim
+	android/assets/ui_atlas.meta
 	assets/lang
 	assets/shaders
 	assets/Roboto-Condensed.ttf
@@ -1941,6 +1933,7 @@ set(NativeAssets
 	assets/gamecontrollerdb.txt
 	assets/langregion.ini
 	assets/ppge_atlas.zim
+	assets/ppge_atlas.meta
 	assets/rargray.png
 	assets/unknown.png
 	assets/zip.png

@@ -51,6 +51,7 @@
 #include "file/zip_read.h"
 #include "net/http_client.h"
 #include "net/resolve.h"
+#include "gfx/texture_atlas.h"
 #include "gfx_es2/draw_text.h"
 #include "gfx_es2/gpu_features.h"
 #include "i18n/i18n.h"
@@ -90,7 +91,6 @@
 #include "Core/WebServer.h"
 #include "GPU/GPUInterface.h"
 
-#include "ui_atlas.h"
 #include "UI/EmuScreen.h"
 #include "UI/GameInfoCache.h"
 #include "UI/HostTypes.h"
@@ -121,6 +121,8 @@
 
 static UI::Theme ui_theme;
 
+Atlas g_ui_atlas;
+
 #if defined(ARM) && defined(__ANDROID__)
 #include "../../android/jni/ArmEmitterTest.h"
 #elif defined(ARM64) && defined(__ANDROID__)
@@ -141,8 +143,6 @@ static UI::Theme ui_theme;
 
 ScreenManager *screenManager;
 std::string config_filename;
-
-bool g_graphicsInited;
 
 // Really need to clean this mess of globals up... but instead I add more :P
 bool g_TakeScreenshot;
@@ -752,20 +752,20 @@ static UI::Style MakeStyle(uint32_t fg, uint32_t bg) {
 
 static void UIThemeInit() {
 #if defined(USING_WIN_UI) || PPSSPP_PLATFORM(UWP) || defined(USING_QT_UI)
-	ui_theme.uiFont = UI::FontStyle(UBUNTU24, g_Config.sFont.c_str(), 22);
-	ui_theme.uiFontSmall = UI::FontStyle(UBUNTU24, g_Config.sFont.c_str(), 15);
-	ui_theme.uiFontSmaller = UI::FontStyle(UBUNTU24, g_Config.sFont.c_str(), 12);
+	ui_theme.uiFont = UI::FontStyle(FontID("UBUNTU24"), g_Config.sFont.c_str(), 22);
+	ui_theme.uiFontSmall = UI::FontStyle(FontID("UBUNTU24"), g_Config.sFont.c_str(), 15);
+	ui_theme.uiFontSmaller = UI::FontStyle(FontID("UBUNTU24"), g_Config.sFont.c_str(), 12);
 #else
-	ui_theme.uiFont = UI::FontStyle(UBUNTU24, "", 20);
-	ui_theme.uiFontSmall = UI::FontStyle(UBUNTU24, "", 14);
-	ui_theme.uiFontSmaller = UI::FontStyle(UBUNTU24, "", 11);
+	ui_theme.uiFont = UI::FontStyle(FontID("UBUNTU24"), "", 20);
+	ui_theme.uiFontSmall = UI::FontStyle(FontID("UBUNTU24"), "", 14);
+	ui_theme.uiFontSmaller = UI::FontStyle(FontID("UBUNTU24"), "", 11);
 #endif
 
-	ui_theme.checkOn = I_CHECKEDBOX;
-	ui_theme.checkOff = I_SQUARE;
-	ui_theme.whiteImage = I_SOLIDWHITE;
-	ui_theme.sliderKnob = I_CIRCLE;
-	ui_theme.dropShadow4Grid = I_DROP_SHADOW;
+	ui_theme.checkOn = ImageID("I_CHECKEDBOX");
+	ui_theme.checkOff = ImageID("I_SQUARE");
+	ui_theme.whiteImage = ImageID("I_SOLIDWHITE");
+	ui_theme.sliderKnob = ImageID("I_CIRCLE");
+	ui_theme.dropShadow4Grid = ImageID("I_DROP_SHADOW");
 
 	ui_theme.itemStyle = MakeStyle(g_Config.uItemStyleFg, g_Config.uItemStyleBg);
 	ui_theme.itemFocusedStyle = MakeStyle(g_Config.uItemFocusedStyleFg, g_Config.uItemFocusedStyleBg);
@@ -792,14 +792,26 @@ bool NativeInitGraphics(GraphicsContext *graphicsContext) {
 	ILOG("NativeInitGraphics");
 	_assert_msg_(G3D, graphicsContext, "No graphics context!");
 
+	// We set this now so any resize during init is processed later.
+	resized = false;
+
 	using namespace Draw;
 	Core_SetGraphicsContext(graphicsContext);
 	g_draw = graphicsContext->GetDrawContext();
 	_assert_msg_(G3D, g_draw, "No draw context available!");
 	_assert_msg_(G3D, g_draw->GetVshaderPreset(VS_COLOR_2D) != nullptr, "Failed to compile presets");
 
-	ui_draw2d.SetAtlas(&ui_atlas);
-	ui_draw2d_front.SetAtlas(&ui_atlas);
+	// Load the atlas.
+
+	size_t atlas_data_size = 0;
+	if (!g_ui_atlas.IsMetadataLoaded()) {
+		const uint8_t *atlas_data = VFSReadFile("ui_atlas.meta", &atlas_data_size);
+		bool load_success = g_ui_atlas.Load(atlas_data, atlas_data_size);
+		_assert_msg_(G3D, load_success, "Failed to load ui_atlas.meta");
+		delete[] atlas_data;
+	}
+	ui_draw2d.SetAtlas(&g_ui_atlas);
+	ui_draw2d_front.SetAtlas(&g_ui_atlas);
 
 	UIThemeInit();
 
@@ -872,7 +884,6 @@ bool NativeInitGraphics(GraphicsContext *graphicsContext) {
 	if (gpu)
 		gpu->DeviceRestore();
 
-	g_graphicsInited = true;
 	ILOG("NativeInitGraphics completed");
 	return true;
 }
@@ -883,7 +894,6 @@ void NativeShutdownGraphics() {
 	if (gpu)
 		gpu->DeviceLost();
 
-	g_graphicsInited = false;
 	ILOG("NativeShutdownGraphics");
 
 #ifdef _WIN32
@@ -900,7 +910,6 @@ void NativeShutdownGraphics() {
 	}
 #endif
 
-	ShutdownWebServer();
 	UIBackgroundShutdown();
 
 	delete g_gameInfoCache;
@@ -1307,12 +1316,8 @@ void NativeMessageReceived(const char *message, const char *value) {
 
 void NativeResized() {
 	// NativeResized can come from any thread so we just set a flag, then process it later.
-	if (g_graphicsInited) {
-		ILOG("NativeResized - setting flag");
-		resized = true;
-	} else {
-		ILOG("NativeResized ignored, not initialized");
-	}
+	ILOG("NativeResized - setting flag");
+	resized = true;
 }
 
 void NativeSetRestarting() {
@@ -1346,6 +1351,8 @@ void NativeShutdown() {
 #endif
 
 	ILOG("NativeShutdown called");
+
+	ShutdownWebServer();
 
 	System_SendMessage("finish", "");
 
