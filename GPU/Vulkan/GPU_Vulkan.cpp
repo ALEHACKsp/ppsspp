@@ -28,7 +28,6 @@
 #include "Core/Config.h"
 #include "Core/Debugger/Breakpoints.h"
 #include "Core/MemMapHelpers.h"
-#include "Core/Config.h"
 #include "Core/Reporting.h"
 #include "Core/System.h"
 #include "Core/ELF/ParamSFO.h"
@@ -98,6 +97,8 @@ GPU_Vulkan::GPU_Vulkan(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
 	if (vulkan_->GetDeviceFeatures().enabled.wideLines) {
 		drawEngine_.SetLineWidth(PSP_CoreParameter().renderWidth / 480.0f);
 	}
+	VulkanRenderManager *rm = (VulkanRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+	rm->SetInflightFrames(g_Config.iInflightFrames);
 
 	// Load shader cache.
 	std::string discID = g_paramSFO.GetDiscID();
@@ -229,7 +230,6 @@ void GPU_Vulkan::CheckGPUFeatures() {
 	features |= GPU_SUPPORTS_ANY_COPY_IMAGE;
 	features |= GPU_SUPPORTS_OES_TEXTURE_NPOT;
 	features |= GPU_SUPPORTS_LARGE_VIEWPORTS;
-	features |= GPU_SUPPORTS_16BIT_FORMATS;
 	features |= GPU_SUPPORTS_INSTANCE_RENDERING;
 	features |= GPU_SUPPORTS_VERTEX_TEXTURE_FETCH;
 	features |= GPU_SUPPORTS_TEXTURE_FLOAT;
@@ -250,6 +250,15 @@ void GPU_Vulkan::CheckGPUFeatures() {
 	}
 	if (vulkan_->GetDeviceFeatures().enabled.samplerAnisotropy) {
 		features |= GPU_SUPPORTS_ANISOTROPY;
+	}
+
+	uint32_t fmt4444 = draw_->GetDataFormatSupport(Draw::DataFormat::B4G4R4A4_UNORM_PACK16);
+	uint32_t fmt1555 = draw_->GetDataFormatSupport(Draw::DataFormat::A1R5G5B5_UNORM_PACK16);
+	uint32_t fmt565 = draw_->GetDataFormatSupport(Draw::DataFormat::R5G6B5_UNORM_PACK16);
+	if ((fmt4444 & Draw::FMT_TEXTURE) && (fmt565 & Draw::FMT_TEXTURE) && (fmt1555 & Draw::FMT_TEXTURE)) {
+		features |= GPU_SUPPORTS_16BIT_FORMATS;
+	} else {
+		INFO_LOG(G3D, "Deficient texture format support: 4444: %d  1555: %d  565: %d", fmt4444, fmt1555, fmt565);
 	}
 
 	if (PSP_CoreParameter().compat.flags().ClearToRAM) {
@@ -275,6 +284,9 @@ void GPU_Vulkan::BeginHostFrame() {
 	UpdateCmdInfo();
 
 	if (resized_) {
+		VulkanRenderManager *rm = (VulkanRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+		rm->SetInflightFrames(g_Config.iInflightFrames);
+
 		CheckGPUFeatures();
 		// In case the GPU changed.
 		BuildReportingInfo();
@@ -423,13 +435,13 @@ void GPU_Vulkan::SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat 
 	framebufferManager_->SetDisplayFramebuffer(framebuf, stride, format);
 }
 
-void GPU_Vulkan::CopyDisplayToOutput() {
+void GPU_Vulkan::CopyDisplayToOutput(bool reallyDirty) {
 	// Flush anything left over.
 	drawEngine_.Flush();
 
 	shaderManagerVulkan_->DirtyLastShader();
 
-	framebufferManagerVulkan_->CopyDisplayToOutput();
+	framebufferManagerVulkan_->CopyDisplayToOutput(reallyDirty);
 
 	gstate_c.Dirty(DIRTY_TEXTURE_IMAGE);
 }

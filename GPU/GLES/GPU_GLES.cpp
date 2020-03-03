@@ -97,6 +97,9 @@ GPU_GLES::GPU_GLES(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
 
 	textureCacheGL_->NotifyConfigChanged();
 
+	GLRenderManager *rm = (GLRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+	rm->SetInflightFrames(g_Config.iInflightFrames);
+
 	// Load shader cache.
 	std::string discID = g_paramSFO.GetDiscID();
 	if (discID.size()) {
@@ -355,6 +358,9 @@ void GPU_GLES::BeginHostFrame() {
 	GPUCommon::BeginHostFrame();
 	UpdateCmdInfo();
 	if (resized_) {
+		GLRenderManager *rm = (GLRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+		rm->SetInflightFrames(g_Config.iInflightFrames);
+
 		CheckGPUFeatures();
 		framebufferManager_->Resized();
 		drawEngine_.Resized();
@@ -400,14 +406,14 @@ void GPU_GLES::SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat fo
 	framebufferManagerGL_->SetDisplayFramebuffer(framebuf, stride, format);
 }
 
-void GPU_GLES::CopyDisplayToOutput() {
+void GPU_GLES::CopyDisplayToOutput(bool reallyDirty) {
 	// Flush anything left over.
 	framebufferManagerGL_->RebindFramebuffer();
 	drawEngine_.Flush();
 
 	shaderManagerGL_->DirtyLastShader();
 
-	framebufferManagerGL_->CopyDisplayToOutput();
+	framebufferManagerGL_->CopyDisplayToOutput(reallyDirty);
 	framebufferManagerGL_->EndFrame();
 
 	// If buffered, discard the depth buffer of the backbuffer. Don't even know if we need one.

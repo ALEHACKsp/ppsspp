@@ -195,6 +195,7 @@ public:
 	std::string sPostShaderName;  // Off for off.
 	bool bGfxDebugOutput;
 	bool bGfxDebugSplitSubmit;
+	int iInflightFrames;
 
 	// Sound
 	bool bEnableSound;
@@ -211,6 +212,7 @@ public:
 	int iShowFPSCounter;
 	bool bShowRegionOnGameIcon;
 	bool bShowIDOnGameIcon;
+	float fGameGridScale;
 
 	// TODO: Maybe move to a separate theme system.
 	uint32_t uItemStyleFg;
