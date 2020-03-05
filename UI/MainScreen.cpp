@@ -518,7 +518,7 @@ UI::EventReturn GameBrowser::LastClick(UI::EventParams &e) {
 }
 
 UI::EventReturn GameBrowser::HomeClick(UI::EventParams &e) {
-#ifdef __ANDROID__
+#if PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(SWITCH)
 	SetPath(g_Config.memStickDirectory);
 #elif defined(USING_QT_UI) || defined(USING_WIN_UI)
 	if (System_GetPropertyBool(SYSPROP_HAS_FILE_BROWSER)) {
@@ -653,7 +653,7 @@ void GameBrowser::Refresh() {
 		LinearLayout *gridOptionColumn = new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(64.0, 64.0f));
 		gridOptionColumn->Add(new Spacer(12.0));
 		gridOptionColumn->Add(new Choice(ImageID("I_GEAR"), new LayoutParams(64.0f, 64.0f)))->OnClick.Handle(this, &GameBrowser::GridSettingsClick);
-		LinearLayout *grid = new LinearLayout(ORIENT_HORIZONTAL);
+		LinearLayout *grid = new LinearLayout(ORIENT_HORIZONTAL, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT));
 		gameList_->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 0.75));
 		grid->Add(gameList_);
 		grid->Add(gridOptionColumn);
