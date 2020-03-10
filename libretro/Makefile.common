@@ -11,6 +11,7 @@ INCFLAGS += \
 	-I$(CORE_DIR) \
 	-I$(COMMONDIR) \
 	-I$(CORE_DIR)/libretro \
+	-I$(EXTDIR)/glslang \
 	-I$(EXTDIR)/native \
 	-I$(EXTDIR)/zlib \
 	-I$(EXTDIR)/snappy \
@@ -305,6 +306,7 @@ SOURCES_CXX += $(NATIVEDIR)/math/dataconv.cpp \
           $(NATIVEDIR)/thin3d/DataFormatGL.cpp \
 	       $(NATIVEDIR)/thread/threadutil.cpp \
 	       $(NATIVEDIR)/thread/threadpool.cpp \
+	       $(NATIVEDIR)/ui/root.cpp \
 	       $(NATIVEDIR)/ui/screen.cpp \
 	       $(NATIVEDIR)/ui/ui.cpp \
           $(NATIVEDIR)/ui/ui_context.cpp \

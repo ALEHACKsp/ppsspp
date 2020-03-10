@@ -27,6 +27,7 @@
 #include "gfx_es2/draw_buffer.h"
 #include "math/curves.h"
 #include "base/stringutil.h"
+#include "ui/root.h"
 #include "ui/ui_context.h"
 #include "ui/view.h"
 #include "ui/viewgroup.h"
@@ -36,6 +37,8 @@
 #include "Core/System.h"
 #include "Core/Host.h"
 #include "Core/Reporting.h"
+#include "Core/ELF/PBPReader.h"
+#include "Core/ELF/ParamSFO.h"
 #include "Core/Util/GameManager.h"
 
 #include "UI/BackgroundAudio.h"
@@ -598,6 +601,27 @@ void GameBrowser::Draw(UIContext &dc) {
 	}
 }
 
+static bool IsValidPBP(const std::string &path) {
+	if (!File::Exists(path))
+		return false;
+
+	std::unique_ptr<FileLoader> loader(ConstructFileLoader(path));
+	PBPReader pbp(loader.get());
+	std::vector<u8> sfoData;
+	if (!pbp.GetSubFile(PBP_PARAM_SFO, &sfoData))
+		return false;
+
+	ParamSFOData sfo;
+	sfo.ReadSFO(sfoData);
+	if (sfo.GetValueString("DISC_ID").empty())
+		return false;
+
+	if (sfo.GetValueString("CATEGORY") == "ME")
+		return false;
+
+	return true;
+}
+
 void GameBrowser::Refresh() {
 	using namespace UI;
 
@@ -650,14 +674,18 @@ void GameBrowser::Refresh() {
 			gl->SetSpacing(4.0f);
 			gameList_ = gl;
 		}
-		LinearLayout *gridOptionColumn = new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(64.0, 64.0f));
-		gridOptionColumn->Add(new Spacer(12.0));
-		gridOptionColumn->Add(new Choice(ImageID("I_GEAR"), new LayoutParams(64.0f, 64.0f)))->OnClick.Handle(this, &GameBrowser::GridSettingsClick);
-		LinearLayout *grid = new LinearLayout(ORIENT_HORIZONTAL, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT));
-		gameList_->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 0.75));
-		grid->Add(gameList_);
-		grid->Add(gridOptionColumn);
-		Add(grid);
+		// Until we can come up with a better space to put it (next to the tabs?) let's get rid of the icon config
+		// button on the Recent tab, it's ugly. You can use the button from the other tabs.
+
+		// LinearLayout *gridOptionColumn = new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(64.0, 64.0f));
+		// gridOptionColumn->Add(new Spacer(12.0));
+		// gridOptionColumn->Add(new Choice(ImageID("I_GEAR"), new LayoutParams(64.0f, 64.0f)))->OnClick.Handle(this, &GameBrowser::GridSettingsClick);
+		// LinearLayout *grid = new LinearLayout(ORIENT_HORIZONTAL, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT));
+		// gameList_->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 0.75));
+		// grid->Add(gameList_);
+		// grid->Add(gridOptionColumn);
+		// Add(grid);
+		Add(gameList_);
 	}
 
 	// Find games in the current directory and create new ones.
@@ -678,7 +706,7 @@ void GameBrowser::Refresh() {
 			bool isGame = !fileInfo[i].isDirectory;
 			bool isSaveData = false;
 			// Check if eboot directory
-			if (!isGame && path_.GetPath().size() >= 4 && File::Exists(path_.GetPath() + fileInfo[i].name + "/EBOOT.PBP"))
+			if (!isGame && path_.GetPath().size() >= 4 && IsValidPBP(path_.GetPath() + fileInfo[i].name + "/EBOOT.PBP"))
 				isGame = true;
 			else if (!isGame && File::Exists(path_.GetPath() + fileInfo[i].name + "/PSP_GAME/SYSDIR"))
 				isGame = true;

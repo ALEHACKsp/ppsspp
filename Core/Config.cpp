@@ -920,7 +920,15 @@ static ConfigSetting controlSettings[] = {
 static ConfigSetting networkSettings[] = {
 	ConfigSetting("EnableWlan", &g_Config.bEnableWlan, false, true, true),
 	ConfigSetting("EnableAdhocServer", &g_Config.bEnableAdhocServer, false, true, true),
-
+	ConfigSetting("EnableNetworkChat", &g_Config.bEnableNetworkChat, false, true, true),
+	ConfigSetting("ChatButtonPosition",&g_Config.iChatButtonPosition,BOTTOM_LEFT,true,true),
+	ConfigSetting("ChatScreenPosition",&g_Config.iChatScreenPosition,BOTTOM_LEFT,true,true),
+	ConfigSetting("EnableQuickChat", &g_Config.bEnableQuickChat, true, true, true),
+	ConfigSetting("QuickChat1", &g_Config.sQuickChat0, "Quick Chat 1", true, true),
+	ConfigSetting("QuickChat2", &g_Config.sQuickChat1, "Quick Chat 2", true, true),
+	ConfigSetting("QuickChat3", &g_Config.sQuickChat2, "Quick Chat 3", true, true),
+	ConfigSetting("QuickChat4", &g_Config.sQuickChat3, "Quick Chat 4", true, true),
+	ConfigSetting("QuickChat5", &g_Config.sQuickChat4, "Quick Chat 5", true, true),
 	ConfigSetting(false),
 };
 
@@ -960,7 +968,7 @@ static ConfigSetting systemParamSettings[] = {
 	ReportedConfigSetting("ButtonPreference", &g_Config.iButtonPreference, PSP_SYSTEMPARAM_BUTTON_CROSS, true, true),
 	ConfigSetting("LockParentalLevel", &g_Config.iLockParentalLevel, 0, true, true),
 	ConfigSetting("WlanAdhocChannel", &g_Config.iWlanAdhocChannel, PSP_SYSTEMPARAM_ADHOC_CHANNEL_AUTOMATIC, true, true),
-#if defined(USING_WIN_UI)
+#if defined(USING_WIN_UI) || defined(USING_QT_UI) || PPSSPP_PLATFORM(ANDROID)
 	ConfigSetting("BypassOSKWithKeyboard", &g_Config.bBypassOSKWithKeyboard, false, true, true),
 #endif
 	ConfigSetting("WlanPowerSave", &g_Config.bWlanPowerSave, (bool) PSP_SYSTEMPARAM_WLAN_POWERSAVE_OFF, true, true),
@@ -1104,6 +1112,12 @@ std::map<std::string, std::pair<std::string, int>> GetLangValuesMapping() {
 		langValuesMapping[keys[i]] = std::make_pair(langName, iLangCode);
 	}
 	return langValuesMapping;
+}
+
+void Config::Reload() {
+	reload_ = true;
+	Load();
+	reload_ = false;
 }
 
 void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
@@ -1481,7 +1495,8 @@ bool Config::hasGameConfig(const std::string &pGameId) {
 }
 
 void Config::changeGameSpecific(const std::string &pGameId, const std::string &title) {
-	Save("changeGameSpecific");
+	if (!reload_)
+		Save("changeGameSpecific");
 	gameId_ = pGameId;
 	gameIdTitle_ = title;
 	bGameSpecific = !pGameId.empty();
@@ -1560,7 +1575,7 @@ bool Config::loadGameConfig(const std::string &pGameId, const std::string &title
 }
 
 void Config::unloadGameConfig() {
-	if (bGameSpecific){
+	if (bGameSpecific) {
 		changeGameSpecific();
 
 		IniFile iniFile;

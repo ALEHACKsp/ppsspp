@@ -86,6 +86,7 @@
 #include "Core/HLE/sceCtrl.h"
 #include "Core/HLE/sceUsbCam.h"
 #include "Core/HLE/sceUsbGps.h"
+#include "Core/HLE/proAdhoc.h"
 #include "Core/Util/GameManager.h"
 #include "Core/Util/AudioFormat.h"
 #include "Core/WebServer.h"
@@ -158,13 +159,19 @@ struct PendingMessage {
 	std::string value;
 };
 
+struct PendingInputBox {
+	std::function<void(bool, const std::string &)> cb;
+	bool result;
+	std::string value;
+};
+
 static std::mutex pendingMutex;
 static std::vector<PendingMessage> pendingMessages;
+static std::vector<PendingInputBox> pendingInputBoxes;
 static Draw::DrawContext *g_draw;
 static Draw::Pipeline *colorPipeline;
 static Draw::Pipeline *texColorPipeline;
 static UIContext *uiContext;
-static std::vector<std::string> inputboxValue;
 
 #ifdef _WIN32
 WindowsAudioBackend *winAudioBackend;
@@ -444,6 +451,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	setlocale( LC_ALL, "C" );
 	std::string user_data_path = savegame_dir;
 	pendingMessages.clear();
+	pendingInputBoxes.clear();
 #ifdef IOS
 	user_data_path += "/";
 #endif
@@ -537,6 +545,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	const char *stateToLoad = 0;
 
 	bool gotBootFilename = false;
+	boot_filename = "";
 
 	// Parse command line
 	LogTypes::LOG_LEVELS logLevel = LogTypes::LINFO;
@@ -1092,19 +1101,6 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 	if (msg == "inputDeviceConnected") {
 		KeyMap::NotifyPadConnected(value);
 	}
-	if (msg == "inputbox_completed") {
-		SplitString(value, ':', inputboxValue);
-		std::string setString = inputboxValue.size() > 1 ? inputboxValue[1] : "";
-		if (inputboxValue[0] == "IP")
-			g_Config.proAdhocServer = setString;
-		else if (inputboxValue[0] == "nickname")
-			g_Config.sNickName = setString;
-		else if (inputboxValue[0] == "remoteiso_subdir")
-			g_Config.sRemoteISOSubdir = setString;
-		else if (inputboxValue[0] == "remoteiso_server")
-			g_Config.sLastRemoteISOServer = setString;
-		inputboxValue.clear();
-	}
 	if (msg == "bgImage_updated") {
 		if (!value.empty()) {
 			std::string dest = GetSysDirectory(DIRECTORY_SYSTEM) + (endsWithNoCase(value, ".jpg") ? "background.jpg" : "background.png");
@@ -1149,7 +1145,7 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 		// and I can't risk it before 1.9.0.
 		int gpuBackend = g_Config.iGPUBackend;
 		ILOG("Reloading config after storage permission grant.");
-		g_Config.Load();
+		g_Config.Reload();
 		PostLoadConfig();
 		g_Config.iGPUBackend = gpuBackend;
 	}
@@ -1159,15 +1155,21 @@ void NativeUpdate() {
 	PROFILE_END_FRAME();
 
 	std::vector<PendingMessage> toProcess;
+	std::vector<PendingInputBox> inputToProcess;
 	{
 		std::lock_guard<std::mutex> lock(pendingMutex);
 		toProcess = std::move(pendingMessages);
+		inputToProcess = std::move(pendingInputBoxes);
 		pendingMessages.clear();
+		pendingInputBoxes.clear();
 	}
 
-	for (size_t i = 0; i < toProcess.size(); i++) {
-		HandleGlobalMessage(toProcess[i].msg, toProcess[i].value);
-		screenManager->sendMessage(toProcess[i].msg.c_str(), toProcess[i].value.c_str());
+	for (const auto &item : toProcess) {
+		HandleGlobalMessage(item.msg, item.value);
+		screenManager->sendMessage(item.msg.c_str(), item.value.c_str());
+	}
+	for (const auto &item : inputToProcess) {
+		item.cb(item.result, item.value);
 	}
 
 	g_DownloadManager.Update();
@@ -1312,6 +1314,15 @@ void NativeMessageReceived(const char *message, const char *value) {
 	pendingMessage.msg = message;
 	pendingMessage.value = value;
 	pendingMessages.push_back(pendingMessage);
+}
+
+void NativeInputBoxReceived(std::function<void(bool, const std::string &)> cb, bool result, const std::string &value) {
+	std::lock_guard<std::mutex> lock(pendingMutex);
+	PendingInputBox pendingMessage;
+	pendingMessage.cb = cb;
+	pendingMessage.result = result;
+	pendingMessage.value = value;
+	pendingInputBoxes.push_back(pendingMessage);
 }
 
 void NativeResized() {
