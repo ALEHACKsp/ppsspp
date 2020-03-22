@@ -250,6 +250,9 @@ inline void rot(float *v, float angle, float xc, float yc) {
 
 void DrawBuffer::DrawImageRotated(ImageID atlas_image, float x, float y, float scale, float angle, Color color, bool mirror_h) {
 	const AtlasImage *image = atlas->getImage(atlas_image);
+	if (!image)
+		return;
+
 	float w = (float)image->w * scale;
 	float h = (float)image->h * scale;
 	float x1 = x - w / 2;
@@ -365,7 +368,7 @@ void DrawBuffer::DrawImage2GridH(ImageID atlas_image, float x1, float y1, float 
 class AtlasWordWrapper : public WordWrapper {
 public:
 	// Note: maxW may be height if rotated.
-	AtlasWordWrapper(const AtlasFont &atlasfont, float scale, const char *str, float maxW) : WordWrapper(str, maxW), atlasfont_(atlasfont), scale_(scale) {
+	AtlasWordWrapper(const AtlasFont &atlasfont, float scale, const char *str, float maxW, int flags) : WordWrapper(str, maxW, flags), atlasfont_(atlasfont), scale_(scale) {
 	}
 
 protected:
@@ -442,14 +445,15 @@ void DrawBuffer::MeasureTextRect(FontID font_id, const char *text, int count, co
 	}
 
 	std::string toMeasure = std::string(text, count);
-	if (align & FLAG_WRAP_TEXT) {
+	int wrap = align & (FLAG_WRAP_TEXT | FLAG_ELLIPSIZE_TEXT);
+	if (wrap) {
 		const AtlasFont *font = atlas->getFont(font_id);
 		if (!font) {
 			*w = 0.0f;
 			*h = 0.0f;
 			return;
 		}
-		AtlasWordWrapper wrapper(*font, fontscalex, toMeasure.c_str(), bounds.w);
+		AtlasWordWrapper wrapper(*font, fontscalex, toMeasure.c_str(), bounds.w, wrap);
 		toMeasure = wrapper.Wrapped();
 	}
 	MeasureTextCount(font_id, toMeasure.c_str(), (int)toMeasure.length(), w, h);
@@ -491,8 +495,10 @@ void DrawBuffer::DrawTextRect(FontID font, const char *text, float x, float y, f
 	}
 
 	std::string toDraw = text;
-	if (align & FLAG_WRAP_TEXT) {
-		AtlasWordWrapper wrapper(*atlas->getFont(font), fontscalex, toDraw.c_str(), w);
+	int wrap = align & (FLAG_WRAP_TEXT | FLAG_ELLIPSIZE_TEXT);
+	const AtlasFont *atlasfont = atlas->getFont(font);
+	if (wrap && atlasfont) {
+		AtlasWordWrapper wrapper(*atlasfont, fontscalex, toDraw.c_str(), w, wrap);
 		toDraw = wrapper.Wrapped();
 	}
 

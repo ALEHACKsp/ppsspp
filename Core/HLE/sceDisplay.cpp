@@ -49,6 +49,7 @@
 #include "Core/HLE/sceKernel.h"
 #include "Core/HLE/sceKernelThread.h"
 #include "Core/HLE/sceKernelInterrupt.h"
+#include "Core/Util/PPGeDraw.h"
 
 #include "GPU/GPU.h"
 #include "GPU/GPUState.h"
@@ -753,9 +754,17 @@ void __DisplayFlip(int cyclesLate) {
 	// Also let's always flip for animated shaders.
 	const ShaderInfo *shaderInfo = g_Config.sPostShaderName == "Off" ? nullptr : GetPostShaderInfo(g_Config.sPostShaderName);
 	bool postEffectRequiresFlip = false;
-	if (shaderInfo && g_Config.iRenderingMode != FB_NON_BUFFERED_MODE)
-		postEffectRequiresFlip = shaderInfo->requires60fps;
+	// postEffectRequiresFlip is not compatible with frameskip unthrottling, see #12325.
+	if (g_Config.iRenderingMode != FB_NON_BUFFERED_MODE && !(g_Config.bFrameSkipUnthrottle && !FrameTimingThrottled())) {
+		if (shaderInfo) {
+			postEffectRequiresFlip = (shaderInfo->requires60fps || g_Config.bRenderDuplicateFrames);
+		} else {
+			postEffectRequiresFlip = g_Config.bRenderDuplicateFrames;
+		}
+	}
+
 	const bool fbDirty = gpu->FramebufferDirty();
+
 	if (fbDirty || noRecentFlip || postEffectRequiresFlip) {
 		int frameSleepPos = frameTimeHistoryPos;
 		CalculateFPS();
@@ -832,6 +841,7 @@ void __DisplayFlip(int cyclesLate) {
 
 void hleAfterFlip(u64 userdata, int cyclesLate) {
 	gpu->BeginFrame();  // doesn't really matter if begin or end of frame.
+	PPGeNotifyFrame();
 
 	// This seems like as good a time as any to check if the config changed.
 	if (lagSyncScheduled != g_Config.bForceLagSync) {
@@ -942,6 +952,8 @@ void __DisplaySetFramebuf(u32 topaddr, int linesize, int pixelFormat, int sync) 
 	if (sync == PSP_DISPLAY_SETBUF_IMMEDIATE) {
 		// Write immediately to the current framebuffer parameters.
 		framebuf = fbstate;
+		// Also update latchedFramebuf for any sceDisplayGetFramebuf() after this.
+		latchedFramebuf = fbstate;
 		gpu->SetDisplayFramebuffer(framebuf.topaddr, framebuf.stride, framebuf.fmt);
 		// IMMEDIATE means that the buffer is fine. We can just flip immediately.
 		// Doing it in non-buffered though creates problems (black screen) on occasion though
@@ -1046,9 +1058,7 @@ bool __DisplayGetFramebuf(PSPPointer<u8> *topaddr, u32 *linesize, u32 *pixelForm
 }
 
 static u32 sceDisplayGetFramebuf(u32 topaddrPtr, u32 linesizePtr, u32 pixelFormatPtr, int latchedMode) {
-	// NOTE: This is wrong and partially reverts #8753. Presumably there's something else involved here as well.
-	// See #8816. Could also be a firmware version difference, there are a few of those...
-	const FrameBufferState &fbState = (latchedMode == PSP_DISPLAY_SETBUF_NEXTFRAME && framebufIsLatched) ? latchedFramebuf : framebuf;
+	const FrameBufferState &fbState = latchedMode == PSP_DISPLAY_SETBUF_NEXTFRAME ? latchedFramebuf : framebuf;
 
 	if (Memory::IsValidAddress(topaddrPtr))
 		Memory::Write_U32(fbState.topaddr, topaddrPtr);
