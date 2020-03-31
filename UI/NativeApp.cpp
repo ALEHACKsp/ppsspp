@@ -402,8 +402,11 @@ static void CheckFailedGPUBackends() {
 
 	// Okay, let's not try a backend in the failed list.
 	g_Config.iGPUBackend = g_Config.NextValidBackend();
-	if (lastBackend != g_Config.iGPUBackend)
-		WARN_LOG(LOADER, "Failed graphics backend switched from %d to %d", lastBackend, g_Config.iGPUBackend);
+	if (lastBackend != g_Config.iGPUBackend) {
+		std::string param = GPUBackendToString((GPUBackend)lastBackend) + " -> " + GPUBackendToString((GPUBackend)g_Config.iGPUBackend);
+		System_SendMessage("graphics_failedBackend", param.c_str());
+		WARN_LOG(LOADER, "Failed graphics backend switched from %s (%d to %d)", param.c_str(), lastBackend, g_Config.iGPUBackend);
+	}
 	// And then let's - for now - add the current to the failed list.
 	if (g_Config.sFailedGPUBackends.empty()) {
 		g_Config.sFailedGPUBackends = GPUBackendToString((GPUBackend)g_Config.iGPUBackend);
@@ -649,15 +652,6 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 		LogManager::GetInstance()->ChangeFileLog(fileToLog);
 
 	PostLoadConfig();
-
-	// Hard reset the logs. TODO: Get rid of this and read from config.
-#ifndef _WIN32
-	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
-		LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
-		logman->SetEnabled(type, true);
-		logman->SetLogLevel(type, logLevel);
-	}
-#endif
 
 #if defined(__ANDROID__) || (defined(MOBILE_DEVICE) && !defined(_DEBUG))
 	// Enable basic logging for any kind of mobile device, since LogManager doesn't.
