@@ -261,8 +261,7 @@ void GameSettingsScreen::CreateViews() {
 			return UI::EVENT_CONTINUE;
 		});
 		softwareGPU->OnClick.Handle(this, &GameSettingsScreen::OnSoftwareRendering);
-		if (PSP_IsInited())
-			softwareGPU->SetEnabled(false);
+		softwareGPU->SetEnabled(!PSP_IsInited());
 	}
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Frame Rate Control")));
@@ -315,11 +314,7 @@ void GameSettingsScreen::CreateViews() {
 #endif
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Performance")));
-#ifndef MOBILE_DEVICE
 	static const char *internalResolutions[] = { "Auto (1:1)", "1x PSP", "2x PSP", "3x PSP", "4x PSP", "5x PSP", "6x PSP", "7x PSP", "8x PSP", "9x PSP", "10x PSP" };
-#else
-	static const char *internalResolutions[] = { "Auto (1:1)", "1x PSP", "2x PSP", "3x PSP", "4x PSP", "5x PSP" };
-#endif
 	resolutionChoice_ = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iInternalResolution, gr->T("Rendering Resolution"), internalResolutions, 0, ARRAY_SIZE(internalResolutions), gr->GetName(), screenManager()));
 	resolutionChoice_->OnChoice.Handle(this, &GameSettingsScreen::OnResolutionChange);
 	resolutionChoice_->SetEnabledFunc([] {
@@ -825,6 +820,7 @@ void GameSettingsScreen::CreateViews() {
 	memstickPath->OnClick.Handle(this, &GameSettingsScreen::OnChangeMemStickDir);
 #elif defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
 	SavePathInMyDocumentChoice = systemSettings->Add(new CheckBox(&installed_, sy->T("Save path in My Documents", "Save path in My Documents")));
+	SavePathInMyDocumentChoice->SetEnabled(!PSP_IsInited());
 	SavePathInMyDocumentChoice->OnClick.Handle(this, &GameSettingsScreen::OnSavePathMydoc);
 	SavePathInOtherChoice = systemSettings->Add(new CheckBox(&otherinstalled_, sy->T("Save path in installed.txt", "Save path in installed.txt")));
 	SavePathInOtherChoice->SetEnabled(false);
@@ -840,7 +836,7 @@ void GameSettingsScreen::CreateViews() {
 			if (!(File::Delete(PPSSPPpath + "installedTEMP.txt")))
 				SavePathInMyDocumentChoice->SetEnabled(false);
 			else
-				SavePathInOtherChoice->SetEnabled(true);
+				SavePathInOtherChoice->SetEnabled(!PSP_IsInited());
 		} else
 			SavePathInMyDocumentChoice->SetEnabled(false);
 	} else {
@@ -857,7 +853,7 @@ void GameSettingsScreen::CreateViews() {
 				// Skip UTF-8 encoding bytes if there are any. There are 3 of them.
 				if (tempString.substr(0, 3) == "\xEF\xBB\xBF")
 					tempString = tempString.substr(3);
-				SavePathInOtherChoice->SetEnabled(true);
+				SavePathInOtherChoice->SetEnabled(!PSP_IsInited());
 				if (!(tempString == "")) {
 					installed_ = false;
 					otherinstalled_ = true;
@@ -871,7 +867,7 @@ void GameSettingsScreen::CreateViews() {
 #endif
 
 #if defined(_M_X64)
-	systemSettings->Add(new CheckBox(&g_Config.bCacheFullIsoInRam, sy->T("Cache ISO in RAM", "Cache full ISO in RAM")));
+	systemSettings->Add(new CheckBox(&g_Config.bCacheFullIsoInRam, sy->T("Cache ISO in RAM", "Cache full ISO in RAM")))->SetEnabled(!PSP_IsInited());
 #endif
 
 	systemSettings->Add(new ItemHeader(sy->T("Cheats", "Cheats (experimental, see forums)")));
