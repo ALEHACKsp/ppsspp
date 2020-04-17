@@ -27,7 +27,7 @@ MainWindow::MainWindow(QWidget *parent, bool fullscreen) :
 
 	// Move window to the center of selected screen
 	QRect rect = desktop->screenGeometry(screenNum);
-	move((rect.width()-frameGeometry().width()) / 4, (rect.height()-frameGeometry().height()) / 4);
+	move((rect.width() - frameGeometry().width()) / 4, (rect.height() - frameGeometry().height()) / 4);
 
 	setWindowIcon(QIcon(qApp->applicationDirPath() + "/assets/icon_regular_72.png"));
 
@@ -253,6 +253,26 @@ void MainWindow::sstateAct()
 	}
 }
 
+void MainWindow::recordDisplayAct()
+{
+	g_Config.bDumpFrames = !g_Config.bDumpFrames;
+}
+
+void MainWindow::useLosslessVideoCodecAct()
+{
+	g_Config.bUseFFV1 = !g_Config.bUseFFV1;
+}
+
+void MainWindow::useOutputBufferAct()
+{
+	g_Config.bDumpVideoOutput = !g_Config.bDumpVideoOutput;
+}
+
+void MainWindow::recordAudioAct()
+{
+	g_Config.bDumpAudio = !g_Config.bDumpAudio;
+}
+
 void MainWindow::exitAct()
 {
 	closeAct();
@@ -267,6 +287,12 @@ void MainWindow::runAct()
 void MainWindow::pauseAct()
 {
 	NativeMessageReceived("pause", "");
+}
+
+void MainWindow::stopAct()
+{
+	Core_Stop();
+	NativeMessageReceived("stop", "");
 }
 
 void MainWindow::resetAct()
@@ -524,10 +550,8 @@ void MainWindow::createMenus()
 	MenuTree* fileMenu = new MenuTree(this, menuBar(),    QT_TR_NOOP("&File"));
 	fileMenu->add(new MenuAction(this, SLOT(loadAct()),       QT_TR_NOOP("&Load..."), QKeySequence::Open))
 		->addEnableState(UISTATE_MENU);
-	fileMenu->add(new MenuAction(this, SLOT(closeAct()),      QT_TR_NOOP("&Close"), QKeySequence::Close))
-		->addDisableState(UISTATE_MENU);
 	fileMenu->addSeparator();
-	fileMenu->add(new MenuAction(this, SLOT(openmsAct()),       QT_TR_NOOP("Open &Memory stick")))
+	fileMenu->add(new MenuAction(this, SLOT(openmsAct()),       QT_TR_NOOP("Open &Memory Stick")))
 		->addEnableState(UISTATE_MENU);
 	fileMenu->addSeparator();
 	MenuTree* savestateMenu = new MenuTree(this, fileMenu, QT_TR_NOOP("Saves&tate slot"));
@@ -542,16 +566,26 @@ void MainWindow::createMenus()
 		->addDisableState(UISTATE_MENU);
 	fileMenu->add(new MenuAction(this, SLOT(sstateAct()),     QT_TR_NOOP("&Save state file...")))
 		->addDisableState(UISTATE_MENU);
+	MenuTree* recordMenu = new MenuTree(this, fileMenu, QT_TR_NOOP("&Record"));
+	recordMenu->add(new MenuAction(this, SLOT(recordDisplayAct()),         QT_TR_NOOP("Record &display")))
+		->addEventChecked(&g_Config.bDumpFrames);
+	recordMenu->add(new MenuAction(this, SLOT(useLosslessVideoCodecAct()), QT_TR_NOOP("&Use lossless video codec (FFV1)")))
+		->addEventChecked(&g_Config.bUseFFV1);
+	recordMenu->add(new MenuAction(this, SLOT(useOutputBufferAct()),       QT_TR_NOOP("Use output buffer for video")))
+		->addEventChecked(&g_Config.bDumpVideoOutput);
+	recordMenu->addSeparator();
+	recordMenu->add(new MenuAction(this, SLOT(recordAudioAct()),        QT_TR_NOOP("Record &audio")))
+		->addEventChecked(&g_Config.bDumpAudio);
 	fileMenu->addSeparator();
 	fileMenu->add(new MenuAction(this, SLOT(exitAct()),       QT_TR_NOOP("E&xit"), QKeySequence::Quit));
 
 	// Emulation
 	MenuTree* emuMenu = new MenuTree(this, menuBar(),     QT_TR_NOOP("&Emulation"));
-	emuMenu->add(new MenuAction(this, SLOT(runAct()),         QT_TR_NOOP("&Run"), Qt::Key_F7))
-		->addEnableStepping()->addEnableState(UISTATE_PAUSEMENU);
-	emuMenu->add(new MenuAction(this, SLOT(pauseAct()),       QT_TR_NOOP("&Pause"), Qt::Key_F8))
+	emuMenu->add(new MenuAction(this, SLOT(pauseAct()),       QT_TR_NOOP("&Pause")))
 		->addEnableState(UISTATE_INGAME);
-	emuMenu->add(new MenuAction(this, SLOT(resetAct()),       QT_TR_NOOP("Re&set")))
+	emuMenu->add(new MenuAction(this, SLOT(stopAct()),       QT_TR_NOOP("&Stop"), Qt::CTRL + Qt::Key_W))
+		->addEnableState(UISTATE_INGAME);
+	emuMenu->add(new MenuAction(this, SLOT(resetAct()),       QT_TR_NOOP("R&eset"), Qt::CTRL + Qt::Key_B))
 		->addEnableState(UISTATE_INGAME);
 	MenuTree* displayRotationMenu = new MenuTree(this, emuMenu, QT_TR_NOOP("Display rotation"));
 	displayRotationGroup = new MenuActionGroup(this, displayRotationMenu, SLOT(displayRotationGroup_triggered(QAction *)),
