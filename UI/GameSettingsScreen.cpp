@@ -290,6 +290,17 @@ void GameSettingsScreen::CreateViews() {
 		return g_Config.iRenderingMode != FB_NON_BUFFERED_MODE;
 	});
 
+	auto shaderChain = GetPostShaderChain(g_Config.sPostShaderName);
+	for (auto shaderInfo : shaderChain) {
+		for (size_t i = 0; i < ARRAY_SIZE(shaderInfo->settings); ++i) {
+			auto &setting = shaderInfo->settings[i];
+			if (!setting.name.empty()) {
+				auto &value = g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderInfo->section.c_str(), i + 1)];
+				graphicsSettings->Add(new PopupSliderChoiceFloat(&value, setting.minValue, setting.maxValue, ps->T(setting.name), setting.step, screenManager()));
+			}
+		}
+	}
+
 #if !defined(MOBILE_DEVICE)
 	graphicsSettings->Add(new CheckBox(&g_Config.bFullScreen, gr->T("FullScreen", "Full Screen")))->OnClick.Handle(this, &GameSettingsScreen::OnFullscreenChange);
 	if (System_GetPropertyInt(SYSPROP_DISPLAY_COUNT) > 1) {
@@ -537,10 +548,6 @@ void GameSettingsScreen::CreateViews() {
 	CheckBox *extraAudio = audioSettings->Add(new CheckBox(&g_Config.bExtraAudioBuffering, a->T("AudioBufferingForBluetooth", "Bluetooth-friendly buffer (slower)")));
 	extraAudio->SetEnabledPtr(&g_Config.bEnableSound);
 #endif
-	if (System_GetPropertyInt(SYSPROP_AUDIO_SAMPLE_RATE) == 44100) {
-		CheckBox *resampling = audioSettings->Add(new CheckBox(&g_Config.bAudioResampler, a->T("Audio sync", "Audio sync (resampling)")));
-		resampling->SetEnabledPtr(&g_Config.bEnableSound);
-	}
 
 	// Control
 	ViewGroup *controlsSettingsScroll = new ScrollView(ORIENT_VERTICAL, new LinearLayoutParams(FILL_PARENT, FILL_PARENT));
@@ -1413,12 +1420,13 @@ UI::EventReturn GameSettingsScreen::OnPostProcShader(UI::EventParams &e) {
 
 UI::EventReturn GameSettingsScreen::OnPostProcShaderChange(UI::EventParams &e) {
 	NativeMessageReceived("gpu_resized", "");
+	RecreateViews(); // Update setting name
 	return UI::EVENT_DONE;
 }
 
 UI::EventReturn GameSettingsScreen::OnDeveloperTools(UI::EventParams &e) {
-screenManager()->push(new DeveloperToolsScreen());
-return UI::EVENT_DONE;
+	screenManager()->push(new DeveloperToolsScreen());
+	return UI::EVENT_DONE;
 }
 
 UI::EventReturn GameSettingsScreen::OnRemoteISO(UI::EventParams &e) {

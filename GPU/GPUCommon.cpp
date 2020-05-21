@@ -678,17 +678,18 @@ u32 GPUCommon::EnqueueList(u32 listpc, u32 stall, int subIntrBase, PSPPointer<Ps
 		ERROR_LOG_REPORT(G3D, "sceGeListEnqueue: invalid address %08x", listpc);
 		return SCE_KERNEL_ERROR_INVALID_POINTER;
 	}
-	
-	if (args.IsValid() && args->size >= 256) {
-		ERROR_LOG_REPORT(G3D, "sceGeListEnqueue: invalid size %d", args->size);
-		return SCE_KERNEL_ERROR_INVALID_SIZE;
-	}
-	
+
 	int id = -1;
 	u64 currentTicks = CoreTiming::GetTicks();
 	u32_le stackAddr = args.IsValid() ? args->stackAddr : 0;
 	// Check compatibility
 	if (sceKernelGetCompiledSdkVersion() > 0x01FFFFFF) {
+		// See #12908.
+		if (args.IsValid() && args->numStacks >= 256) {
+			ERROR_LOG(G3D, "sceGeListEnqueue: invalid size %08x", args->numStacks);
+			return SCE_KERNEL_ERROR_INVALID_SIZE;
+		}
+
 		//numStacks = 0;
 		//stack = NULL;
 		for (int i = 0; i < DisplayListMaxCount; ++i) {
@@ -2442,7 +2443,7 @@ void GPUCommon::DoState(PointerWrap &p) {
 			DisplayList_v1 oldDL;
 			p.Do(oldDL);
 			// On 32-bit, they're the same, on 64-bit oldDL is bigger.
-			memcpy(&dls[i], &oldDL, sizeof(DisplayList));
+			memcpy(&dls[i], &oldDL, sizeof(DisplayList_v1));
 			// Fix the other fields.  Let's hope context wasn't important, it was a pointer.
 			dls[i].context = 0;
 			dls[i].offsetAddr = oldDL.offsetAddr;

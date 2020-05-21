@@ -412,7 +412,7 @@ void EmuScreen::sendMessage(const char *message, const char *value) {
 	} else if (!strcmp(message, "boot")) {
 		const char *ext = strrchr(value, '.');
 		if (ext != nullptr && !strcmp(ext, ".ppst")) {
-			SaveState::Load(value, &AfterStateBoot);
+			SaveState::Load(value, -1, &AfterStateBoot);
 		} else {
 			PSP_Shutdown();
 			bootPending_ = true;
@@ -1265,19 +1265,8 @@ static void DrawDebugStats(DrawBuffer *draw2d, const Bounds &bounds) {
 
 static void DrawAudioDebugStats(DrawBuffer *draw2d, const Bounds &bounds) {
 	FontID ubuntu24("UBUNTU24");
-	char statbuf[1024] = { 0 };
-	const AudioDebugStats *stats = __AudioGetDebugStats();
-	snprintf(statbuf, sizeof(statbuf),
-		"Audio buffer: %d/%d (low watermark: %d)\n"
-		"Underruns: %d\n"
-		"Overruns: %d\n"
-		"Sample rate: %d\n"
-		"Push size: %d\n",
-		stats->buffered, stats->bufsize, stats->watermark,
-		stats->underrunCount,
-		stats->overrunCount,
-		stats->instantSampleRate,
-		stats->lastPushSize);
+	char statbuf[4096] = { 0 };
+	__AudioGetDebugStats(statbuf, sizeof(statbuf));
 	draw2d->SetFontScale(0.7f, 0.7f);
 	draw2d->DrawTextRect(ubuntu24, statbuf, bounds.x + 11, bounds.y + 31, bounds.w - 20, bounds.h - 30, 0xc0000000, FLAG_DYNAMIC_ASCII | FLAG_WRAP_TEXT);
 	draw2d->DrawTextRect(ubuntu24, statbuf, bounds.x + 10, bounds.y + 30, bounds.w - 20, bounds.h - 30, 0xFFFFFFFF, FLAG_DYNAMIC_ASCII | FLAG_WRAP_TEXT);
@@ -1350,9 +1339,9 @@ void EmuScreen::preRender() {
 	if ((!useBufferedRendering && !g_Config.bSoftwareRendering) || Core_IsStepping()) {
 		// We need to clear here already so that drawing during the frame is done on a clean slate.
 		if (Core_IsStepping() && gpuStats.numFlips != 0) {
-			draw->BindFramebufferAsRenderTarget(nullptr, { RPAction::KEEP, RPAction::DONT_CARE, RPAction::DONT_CARE });
+			draw->BindFramebufferAsRenderTarget(nullptr, { RPAction::KEEP, RPAction::DONT_CARE, RPAction::DONT_CARE }, "EmuScreen_BackBuffer");
 		} else {
-			draw->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR, 0xFF000000 });
+			draw->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR, 0xFF000000 }, "EmuScreen_BackBuffer");
 		}
 
 		Viewport viewport;
@@ -1391,7 +1380,7 @@ void EmuScreen::render() {
 		// It's possible this might be set outside PSP_RunLoopFor().
 		// In this case, we need to double check it here.
 		checkPowerDown();
-		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR });
+		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR }, "EmuScreen_Invalid");
 		renderUI();
 		return;
 	}
@@ -1420,7 +1409,7 @@ void EmuScreen::render() {
 	} else if (coreState == CORE_STEPPING) {
 		// If we're stepping, it's convenient not to clear the screen entirely, so we copy display to output.
 		// This won't work in non-buffered, but that's fine.
-		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::DONT_CARE, RPAction::DONT_CARE });
+		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::DONT_CARE, RPAction::DONT_CARE }, "EmuScreen_Stepping");
 		// Just to make sure.
 		if (PSP_IsInited()) {
 			gpu->CopyDisplayToOutput(true);
@@ -1429,7 +1418,7 @@ void EmuScreen::render() {
 		// Didn't actually reach the end of the frame, ran out of the blockTicks cycles.
 		// In this case we need to bind and wipe the backbuffer, at least.
 		// It's possible we never ended up outputted anything - make sure we have the backbuffer cleared
-		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR });
+		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::CLEAR, RPAction::CLEAR, RPAction::CLEAR }, "EmuScreen_NoFrame");
 	}
 	checkPowerDown();
 
@@ -1439,7 +1428,7 @@ void EmuScreen::render() {
 
 	if (hasVisibleUI()) {
 		// In most cases, this should already be bound and a no-op.
-		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::KEEP, RPAction::DONT_CARE, RPAction::DONT_CARE });
+		thin3d->BindFramebufferAsRenderTarget(nullptr, { RPAction::KEEP, RPAction::DONT_CARE, RPAction::DONT_CARE }, "EmuScreen_UI");
 		cardboardDisableButton_->SetVisibility(g_Config.bEnableCardboardVR ? UI::V_VISIBLE : UI::V_GONE);
 		screenManager()->getUIContext()->BeginFrame();
 		renderUI();

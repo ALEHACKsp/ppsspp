@@ -65,12 +65,12 @@ public:
 
 	void UpdateBuffer(Buffer *buffer, const uint8_t *data, size_t offset, size_t size, UpdateBufferFlags flags) override;
 
-	void CopyFramebufferImage(Framebuffer *src, int level, int x, int y, int z, Framebuffer *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBits) override;
-	bool BlitFramebuffer(Framebuffer *src, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter) override;
-	bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride);
+	void CopyFramebufferImage(Framebuffer *src, int level, int x, int y, int z, Framebuffer *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBits, const char *tag) override;
+	bool BlitFramebuffer(Framebuffer *src, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter, const char *tag) override;
+	bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride, const char *tag);
 
 	// These functions should be self explanatory.
-	void BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp) override;
+	void BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp, const char *tag) override;
 	// color must be 0, for now.
 	void BindFramebufferAsTexture(Framebuffer *fbo, int binding, FBChannel channelBit, int attachment) override;
 
@@ -131,26 +131,26 @@ public:
 		}
 	}
 
-	uintptr_t GetNativeObject(NativeObject obj) override {
+	uint64_t GetNativeObject(NativeObject obj) override {
 		switch (obj) {
 		case NativeObject::DEVICE:
-			return (uintptr_t)device_;
+			return (uint64_t)(uintptr_t)device_;
 		case NativeObject::CONTEXT:
-			return (uintptr_t)context_;
+			return (uint64_t)(uintptr_t)context_;
 		case NativeObject::DEVICE_EX:
-			return (uintptr_t)device1_;
+			return (uint64_t)(uintptr_t)device1_;
 		case NativeObject::CONTEXT_EX:
-			return (uintptr_t)context1_;
+			return (uint64_t)(uintptr_t)context1_;
 		case NativeObject::BACKBUFFER_COLOR_TEX:
-			return (uintptr_t)bbRenderTargetTex_;
+			return (uint64_t)(uintptr_t)bbRenderTargetTex_;
 		case NativeObject::BACKBUFFER_DEPTH_TEX:
-			return (uintptr_t)bbDepthStencilTex_;
+			return (uint64_t)(uintptr_t)bbDepthStencilTex_;
 		case NativeObject::BACKBUFFER_COLOR_VIEW:
-			return (uintptr_t)bbRenderTargetView_;
+			return (uint64_t)(uintptr_t)bbRenderTargetView_;
 		case NativeObject::BACKBUFFER_DEPTH_VIEW:
-			return (uintptr_t)bbDepthStencilView_;
+			return (uint64_t)(uintptr_t)bbDepthStencilView_;
 		case NativeObject::FEATURE_LEVEL:
-			return (uintptr_t)featureLevel_;
+			return (uint64_t)(uintptr_t)featureLevel_;
 		default:
 			return 0;
 		}
@@ -1066,7 +1066,7 @@ void D3D11DrawContext::ApplyCurrentState() {
 	int numVBs = (int)curPipeline_->input->strides.size();
 	context_->IASetVertexBuffers(0, 1, nextVertexBuffers_, (UINT *)curPipeline_->input->strides.data(), (UINT *)nextVertexBufferOffsets_);
 	if (dirtyIndexBuffer_) {
-		context_->IASetIndexBuffer(nextIndexBuffer_, DXGI_FORMAT_R32_UINT, nextIndexBufferOffset_);
+		context_->IASetIndexBuffer(nextIndexBuffer_, DXGI_FORMAT_R16_UINT, nextIndexBufferOffset_);
 		dirtyIndexBuffer_ = false;
 	}
 	if (curPipeline_->dynamicUniforms) {
@@ -1340,7 +1340,7 @@ void D3D11DrawContext::BeginFrame() {
 	}
 	if (curPipeline_) {
 		context_->IASetVertexBuffers(0, 1, nextVertexBuffers_, (UINT *)curPipeline_->input->strides.data(), (UINT *)nextVertexBufferOffsets_);
-		context_->IASetIndexBuffer(nextIndexBuffer_, DXGI_FORMAT_R32_UINT, nextIndexBufferOffset_);
+		context_->IASetIndexBuffer(nextIndexBuffer_, DXGI_FORMAT_R16_UINT, nextIndexBufferOffset_);
 		if (curPipeline_->dynamicUniforms) {
 			context_->VSSetConstantBuffers(0, 1, &curPipeline_->dynamicUniforms);
 			context_->PSSetConstantBuffers(0, 1, &curPipeline_->dynamicUniforms);
@@ -1348,7 +1348,7 @@ void D3D11DrawContext::BeginFrame() {
 	}
 }
 
-void D3D11DrawContext::CopyFramebufferImage(Framebuffer *srcfb, int level, int x, int y, int z, Framebuffer *dstfb, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBit) {
+void D3D11DrawContext::CopyFramebufferImage(Framebuffer *srcfb, int level, int x, int y, int z, Framebuffer *dstfb, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBit, const char *tag) {
 	D3D11Framebuffer *src = (D3D11Framebuffer *)srcfb;
 	D3D11Framebuffer *dst = (D3D11Framebuffer *)dstfb;
 
@@ -1396,13 +1396,13 @@ void D3D11DrawContext::CopyFramebufferImage(Framebuffer *srcfb, int level, int x
 	}
 }
 
-bool D3D11DrawContext::BlitFramebuffer(Framebuffer *srcfb, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dstfb, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter) {
+bool D3D11DrawContext::BlitFramebuffer(Framebuffer *srcfb, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dstfb, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter, const char *tag) {
 	// Unfortunately D3D11 has no equivalent to this, gotta render a quad. Well, in some cases we can issue a copy instead.
 	Crash();
 	return false;
 }
 
-bool D3D11DrawContext::CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int bx, int by, int bw, int bh, Draw::DataFormat format, void *pixels, int pixelStride) {
+bool D3D11DrawContext::CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int bx, int by, int bw, int bh, Draw::DataFormat format, void *pixels, int pixelStride, const char *tag) {
 	D3D11Framebuffer *fb = (D3D11Framebuffer *)src;
 
 	if (fb) {
@@ -1522,7 +1522,7 @@ bool D3D11DrawContext::CopyFramebufferToMemorySync(Framebuffer *src, int channel
 	return true;
 }
 
-void D3D11DrawContext::BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp) {
+void D3D11DrawContext::BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp, const char *tag) {
 	// TODO: deviceContext1 can actually discard. Useful on Windows Mobile.
 	if (fbo) {
 		D3D11Framebuffer *fb = (D3D11Framebuffer *)fbo;

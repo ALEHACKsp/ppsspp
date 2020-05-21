@@ -78,7 +78,7 @@ FramebufferManagerVulkan::FramebufferManagerVulkan(Draw::DrawContext *draw, Vulk
 	vulkan_(vulkan) {
 	presentation_->SetLanguage(GLSL_VULKAN);
 
-	DeviceRestore(vulkan, draw);
+	InitDeviceObjects();
 
 	// After a blit we do need to rebind for the VulkanRenderManager to know what to do.
 	needGLESRebinds_ = true;
@@ -265,9 +265,8 @@ void FramebufferManagerVulkan::ReformatFramebufferFrom(VirtualFramebuffer *vfb, 
 	// to exactly reproduce in 4444 and 8888 formats.
 
 	if (old == GE_FORMAT_565) {
-		// TODO: To match other backends, would be ideal to clear alpha only and not color.
-		// But probably doesn't matter that much...
-		draw_->BindFramebufferAsRenderTarget(vfb->fbo, { Draw::RPAction::CLEAR, Draw::RPAction::KEEP, Draw::RPAction::CLEAR });
+		// Previously started a render pass here to clear, but better to just, well, explicitly clear.
+		draw_->Clear(Draw::FBChannel::FB_COLOR_BIT | Draw::FBChannel::FB_STENCIL_BIT, 0, 0.0f, 0);
 	}
 }
 
@@ -278,7 +277,7 @@ void FramebufferManagerVulkan::BlitFramebufferDepth(VirtualFramebuffer *src, Vir
 	bool matchingRenderSize = src->renderWidth == dst->renderWidth && src->renderHeight == dst->renderHeight;
 	if (matchingDepthBuffer && matchingRenderSize && matchingSize) {
 		// TODO: Currently, this copies depth AND stencil, which is a problem.  See #9740.
-		draw_->CopyFramebufferImage(src->fbo, 0, 0, 0, 0, dst->fbo, 0, 0, 0, 0, src->renderWidth, src->renderHeight, 1, Draw::FB_DEPTH_BIT);
+		draw_->CopyFramebufferImage(src->fbo, 0, 0, 0, 0, dst->fbo, 0, 0, 0, 0, src->renderWidth, src->renderHeight, 1, Draw::FB_DEPTH_BIT, "BlitFramebufferDepth");
 		dst->last_frame_depth_updated = gpuStats.numFlips;
 	} else if (matchingDepthBuffer && matchingSize) {
 		/*
@@ -325,19 +324,6 @@ VkImageView FramebufferManagerVulkan::BindFramebufferAsColorTexture(int stage, V
 	}
 }
 
-bool FramebufferManagerVulkan::CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) {
-	nvfb->colorDepth = Draw::FBO_8888;
-
-	nvfb->fbo = draw_->CreateFramebuffer({ nvfb->bufferWidth, nvfb->bufferHeight, 1, 1, true, (Draw::FBColorDepth)nvfb->colorDepth });
-	if (!(nvfb->fbo)) {
-		ERROR_LOG(FRAMEBUF, "Error creating FBO! %i x %i", nvfb->renderWidth, nvfb->renderHeight);
-		return false;
-	}
-
-	draw_->BindFramebufferAsRenderTarget(nvfb->fbo, { Draw::RPAction::CLEAR, Draw::RPAction::CLEAR, Draw::RPAction::CLEAR });
-	return true;
-}
-
 void FramebufferManagerVulkan::UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) {
 	// Nothing to do here.
 }
@@ -346,7 +332,7 @@ void FramebufferManagerVulkan::BlitFramebuffer(VirtualFramebuffer *dst, int dstX
 	if (!dst->fbo || !src->fbo || !useBufferedRendering_) {
 		// This can happen if they recently switched from non-buffered.
 		if (useBufferedRendering_)
-			draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP });
+			draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP }, "BlitFramebuffer_Fail");
 		return;
 	}
 
@@ -407,9 +393,9 @@ void FramebufferManagerVulkan::BlitFramebuffer(VirtualFramebuffer *dst, int dstX
 	const bool xOverlap = src == dst && srcX2 > dstX1 && srcX1 < dstX2;
 	const bool yOverlap = src == dst && srcY2 > dstY1 && srcY1 < dstY2;
 	if (sameSize && sameDepth && srcInsideBounds && dstInsideBounds && !(xOverlap && yOverlap)) {
-		draw_->CopyFramebufferImage(src->fbo, 0, srcX1, srcY1, 0, dst->fbo, 0, dstX1, dstY1, 0, dstX2 - dstX1, dstY2 - dstY1, 1, Draw::FB_COLOR_BIT);
+		draw_->CopyFramebufferImage(src->fbo, 0, srcX1, srcY1, 0, dst->fbo, 0, dstX1, dstY1, 0, dstX2 - dstX1, dstY2 - dstY1, 1, Draw::FB_COLOR_BIT, "BlitFramebuffer_Copy");
 	} else {
-		draw_->BlitFramebuffer(src->fbo, srcX1, srcY1, srcX2, srcY2, dst->fbo, dstX1, dstY1, dstX2, dstY2, Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST);
+		draw_->BlitFramebuffer(src->fbo, srcX1, srcY1, srcX2, srcY2, dst->fbo, dstX1, dstY1, dstX2, dstY2, Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST, "BlitFramebuffer_Blit");
 	}
 }
 
@@ -424,27 +410,12 @@ void FramebufferManagerVulkan::DeviceLost() {
 	DestroyAllFBOs();
 	DestroyDeviceObjects();
 	presentation_->DeviceLost();
-
-	if (allocator_) {
-		allocator_->Destroy();
-
-		// We have to delete on queue, so this can free its queued deletions.
-		vulkan_->Delete().QueueCallback([](void *ptr) {
-			auto allocator = static_cast<VulkanDeviceAllocator *>(ptr);
-			delete allocator;
-		}, allocator_);
-		allocator_ = nullptr;
-	}
 }
 
 void FramebufferManagerVulkan::DeviceRestore(VulkanContext *vulkan, Draw::DrawContext *draw) {
 	vulkan_ = vulkan;
 	draw_ = draw;
 	presentation_->DeviceRestore(draw);
-
-	_assert_(!allocator_);
-
-	allocator_ = new VulkanDeviceAllocator(vulkan_, 1 * 1024 * 1024, 8 * 1024 * 1024);
 
 	InitDeviceObjects();
 }

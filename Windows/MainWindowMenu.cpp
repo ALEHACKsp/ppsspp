@@ -181,6 +181,8 @@ namespace MainWindow {
 
 		availableShaders.clear();
 		for (auto i = info.begin(); i != info.end(); ++i) {
+			if (!i->visible)
+				continue;
 			int checkedStatus = MF_UNCHECKED;
 			availableShaders.push_back(i->section);
 			if (g_Config.sPostShaderName == i->section) {
@@ -632,14 +634,14 @@ namespace MainWindow {
 		case ID_FILE_LOADSTATEFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load state", 0, L"Save States (*.ppst)\0*.ppst\0All files\0*.*\0\0", L"ppst", fn)) {
 				SetCursor(LoadCursor(0, IDC_WAIT));
-				SaveState::Load(fn, SaveStateActionFinished);
+				SaveState::Load(fn, -1, SaveStateActionFinished);
 			}
 			break;
 
 		case ID_FILE_SAVESTATEFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save state", 0, L"Save States (*.ppst)\0*.ppst\0All files\0*.*\0\0", L"ppst", fn)) {
 				SetCursor(LoadCursor(0, IDC_WAIT));
-				SaveState::Save(fn, SaveStateActionFinished);
+				SaveState::Save(fn, -1, SaveStateActionFinished);
 			}
 			break;
 

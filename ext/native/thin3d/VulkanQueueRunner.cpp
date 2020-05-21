@@ -1,4 +1,4 @@
-#include <map>
+#include <unordered_map>
 
 #include "base/timeutil.h"
 #include "DataFormat.h"
@@ -721,23 +721,23 @@ std::string VulkanQueueRunner::StepToString(const VKRStep &step) const {
 	{
 		int w = step.render.framebuffer ? step.render.framebuffer->width : vulkan_->GetBackbufferWidth();
 		int h = step.render.framebuffer ? step.render.framebuffer->height : vulkan_->GetBackbufferHeight();
-		snprintf(buffer, sizeof(buffer), "RenderPass (draws: %d, %dx%d, fb: %p, )", step.render.numDraws, w, h, step.render.framebuffer);
+		snprintf(buffer, sizeof(buffer), "RenderPass %s (draws: %d, %dx%d, fb: %p, )", step.tag, step.render.numDraws, w, h, step.render.framebuffer);
 		break;
 	}
 	case VKRStepType::COPY:
-		snprintf(buffer, sizeof(buffer), "Copy (%dx%d)", step.copy.srcRect.extent.width, step.copy.srcRect.extent.height);
+		snprintf(buffer, sizeof(buffer), "Copy '%s' (%dx%d)", step.tag, step.copy.srcRect.extent.width, step.copy.srcRect.extent.height);
 		break;
 	case VKRStepType::BLIT:
-		snprintf(buffer, sizeof(buffer), "Blit (%dx%d->%dx%d)", step.blit.srcRect.extent.width, step.blit.srcRect.extent.height, step.blit.dstRect.extent.width, step.blit.dstRect.extent.height);
+		snprintf(buffer, sizeof(buffer), "Blit '%s' (%dx%d->%dx%d)", step.tag, step.blit.srcRect.extent.width, step.blit.srcRect.extent.height, step.blit.dstRect.extent.width, step.blit.dstRect.extent.height);
 		break;
 	case VKRStepType::READBACK:
-		snprintf(buffer, sizeof(buffer), "Readback (%dx%d, fb: %p)", step.readback.srcRect.extent.width, step.readback.srcRect.extent.height, step.readback.src);
+		snprintf(buffer, sizeof(buffer), "Readback '%s' (%dx%d, fb: %p)", step.tag, step.readback.srcRect.extent.width, step.readback.srcRect.extent.height, step.readback.src);
 		break;
 	case VKRStepType::READBACK_IMAGE:
-		snprintf(buffer, sizeof(buffer), "ReadbackImage (%dx%d)", step.readback_image.srcRect.extent.width, step.readback_image.srcRect.extent.height);
+		snprintf(buffer, sizeof(buffer), "ReadbackImage '%s' (%dx%d)", step.tag, step.readback_image.srcRect.extent.width, step.readback_image.srcRect.extent.height);
 		break;
 	case VKRStepType::RENDER_SKIP:
-		snprintf(buffer, sizeof(buffer), "(SKIPPED RenderPass)");
+		snprintf(buffer, sizeof(buffer), "(SKIPPED RenderPass) %s", step.tag);
 		break;
 	default:
 		buffer[0] = 0;
@@ -752,12 +752,26 @@ std::string VulkanQueueRunner::StepToString(const VKRStep &step) const {
 void VulkanQueueRunner::ApplyRenderPassMerge(std::vector<VKRStep *> &steps) {
 	// First let's count how many times each framebuffer is rendered to.
 	// If it's more than one, let's do our best to merge them. This can help God of War quite a bit.
-	std::map<VKRFramebuffer *, int> counts;
+	std::unordered_map<VKRFramebuffer *, int> counts;
 	for (int i = 0; i < (int)steps.size(); i++) {
 		if (steps[i]->stepType == VKRStepType::RENDER) {
 			counts[steps[i]->render.framebuffer]++;
 		}
 	}
+
+	auto mergeRenderSteps = [](VKRStep *dst, VKRStep *src) {
+		// OK. Now, if it's a render, slurp up all the commands and kill the step.
+		// Also slurp up any pretransitions.
+		dst->preTransitions.insert(dst->preTransitions.end(), src->preTransitions.begin(), src->preTransitions.end());
+		dst->commands.insert(dst->commands.end(), src->commands.begin(), src->commands.end());
+		// So we don't consider it for other things, maybe doesn't matter.
+		src->dependencies.clear();
+		src->stepType = VKRStepType::RENDER_SKIP;
+	};
+	auto renderHasClear = [](const VKRStep *step) {
+		const auto &r = step->render;
+		return r.color == VKRRenderPassAction::CLEAR || r.depth == VKRRenderPassAction::CLEAR || r.stencil == VKRRenderPassAction::CLEAR;
+	};
 
 	// Now, let's go through the steps. If we find one that is rendered to more than once,
 	// we'll scan forward and slurp up any rendering that can be merged across.
@@ -767,39 +781,36 @@ void VulkanQueueRunner::ApplyRenderPassMerge(std::vector<VKRStep *> &steps) {
 			TinySet<VKRFramebuffer *, 8> touchedFramebuffers;  // must be the same fast-size as the dependencies TinySet for annoying reasons.
 			for (int j = i + 1; j < (int)steps.size(); j++) {
 				// If any other passes are reading from this framebuffer as-is, we cancel the scan.
+				if (steps[j]->dependencies.contains(fb)) {
+					// Reading from itself means a KEEP, which is okay.
+					if (steps[j]->stepType != VKRStepType::RENDER || steps[j]->render.framebuffer != fb)
+						break;
+				}
 				switch (steps[j]->stepType) {
 				case VKRStepType::RENDER:
-					if (steps[j]->dependencies.contains(fb)) {
-						goto done_fb;
-					}
-					// Prevent Unknown's example case from https://github.com/hrydgard/ppsspp/pull/12242
-					if (steps[j]->dependencies.contains(touchedFramebuffers)) {
-						goto done_fb;
-					}
-					if (steps[j]->render.framebuffer == fb &&
-						steps[j]->render.color != VKRRenderPassAction::CLEAR &&
-						steps[j]->render.depth != VKRRenderPassAction::CLEAR &&
-						steps[j]->render.stencil != VKRRenderPassAction::CLEAR) {
-						// ok. Now, if it's a render, slurp up all the commands
-						// and kill the step.
-						// Also slurp up any pretransitions.
-						steps[i]->preTransitions.insert(steps[i]->preTransitions.end(), steps[j]->preTransitions.begin(), steps[j]->preTransitions.end());
-						steps[i]->commands.insert(steps[i]->commands.end(), steps[j]->commands.begin(), steps[j]->commands.end());
-						steps[j]->stepType = VKRStepType::RENDER_SKIP;
-					}
-					// Remember the framebuffer this wrote to. We can't merge with later passes that depend on these.
-					if (steps[j]->render.framebuffer != fb) {
+					if (steps[j]->render.framebuffer == fb) {
+						// Prevent Unknown's example case from https://github.com/hrydgard/ppsspp/pull/12242
+						if (renderHasClear(steps[j]) || steps[j]->dependencies.contains(touchedFramebuffers)) {
+							goto done_fb;
+						} else {
+							// Safe to merge, great.
+							mergeRenderSteps(steps[i], steps[j]);
+						}
+					} else {
+						// Remember the framebuffer this wrote to. We can't merge with later passes that depend on these.
 						touchedFramebuffers.insert(steps[j]->render.framebuffer);
 					}
 					break;
 				case VKRStepType::COPY:
-					if (steps[j]->copy.src == fb || steps[j]->copy.dst == fb) {
+					if (steps[j]->copy.dst == fb) {
+						// Without framebuffer "renaming", we can't merge past a clobbered fb.
 						goto done_fb;
 					}
 					touchedFramebuffers.insert(steps[j]->copy.dst);
 					break;
 				case VKRStepType::BLIT:
-					if (steps[j]->blit.src == fb || steps[j]->blit.dst == fb) {
+					if (steps[j]->blit.dst == fb) {
+						// Without framebuffer "renaming", we can't merge past a clobbered fb.
 						goto done_fb;
 					}
 					touchedFramebuffers.insert(steps[j]->blit.dst);
@@ -807,12 +818,13 @@ void VulkanQueueRunner::ApplyRenderPassMerge(std::vector<VKRStep *> &steps) {
 				case VKRStepType::READBACK:
 					// Not sure this has much effect, when executed READBACK is always the last step
 					// since we stall the GPU and wait immediately after.
-					if (steps[j]->readback.src == fb) {
-						goto done_fb;
-					}
+					break;
+				case VKRStepType::RENDER_SKIP:
+				case VKRStepType::READBACK_IMAGE:
 					break;
 				default:
-					break;
+					// We added a new step?  Might be unsafe.
+					goto done_fb;
 				}
 			}
 			done_fb:
@@ -849,9 +861,22 @@ void VulkanQueueRunner::LogSteps(const std::vector<VKRStep *> &steps) {
 	}
 }
 
+const char *RenderPassActionName(VKRRenderPassAction a) {
+	switch (a) {
+	case VKRRenderPassAction::CLEAR:
+		return "CLEAR";
+	case VKRRenderPassAction::DONT_CARE:
+		return "DONT_CARE";
+	case VKRRenderPassAction::KEEP:
+		return "KEEP";
+	}
+	return "?";
+}
+
 void VulkanQueueRunner::LogRenderPass(const VKRStep &pass) {
-	int fb = (int)(intptr_t)(pass.render.framebuffer ? pass.render.framebuffer->framebuf : 0);
-	ILOG("RenderPass Begin(%x)", fb);
+	const auto &r = pass.render;
+	int fb = (int)(intptr_t)(r.framebuffer ? r.framebuffer->framebuf : 0);
+	ILOG("RenderPass Begin(%x, %s, %s, %s)", fb, RenderPassActionName(r.color), RenderPassActionName(r.depth), RenderPassActionName(r.stencil));
 	for (auto &cmd : pass.commands) {
 		switch (cmd.cmd) {
 		case VKRRenderCommand::REMOVED:

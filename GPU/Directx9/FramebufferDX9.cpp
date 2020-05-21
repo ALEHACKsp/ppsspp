@@ -243,7 +243,7 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 		// to exactly reproduce in 4444 and 8888 formats.
 
 		if (old == GE_FORMAT_565) {
-			draw_->BindFramebufferAsRenderTarget(vfb->fbo, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::CLEAR });
+			draw_->BindFramebufferAsRenderTarget(vfb->fbo, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::CLEAR }, "ReformatFramebuffer");
 
 			dxstate.scissorTest.disable();
 			dxstate.depthWrite.set(FALSE);
@@ -379,19 +379,6 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 		}
 	}
 
-	bool FramebufferManagerDX9::CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) {
-		nvfb->colorDepth = Draw::FBO_8888;
-
-		nvfb->fbo = draw_->CreateFramebuffer({ nvfb->bufferWidth, nvfb->bufferHeight, 1, 1, true, (Draw::FBColorDepth)nvfb->colorDepth });
-		if (!(nvfb->fbo)) {
-			ERROR_LOG(FRAMEBUF, "Error creating FBO! %i x %i", nvfb->renderWidth, nvfb->renderHeight);
-			return false;
-		}
-
-		draw_->BindFramebufferAsRenderTarget(nvfb->fbo, { Draw::RPAction::CLEAR, Draw::RPAction::CLEAR, Draw::RPAction::CLEAR });
-		return true;
-	}
-
 	void FramebufferManagerDX9::UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) {
 		// Nothing to do here.
 	}
@@ -400,7 +387,7 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 		if (!dst->fbo || !src->fbo || !useBufferedRendering_) {
 			// This can happen if we recently switched from non-buffered.
 			if (useBufferedRendering_)
-				draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP });
+				draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP }, "BlitFramebuffer_Fail");
 			return;
 		}
 
@@ -433,7 +420,7 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 			bool result = draw_->BlitFramebuffer(
 				src->fbo, srcX1, srcY1, srcX2, srcY2,
 				tempFBO, dstX1, dstY1, dstX2, dstY2,
-				Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST);
+				Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST, "BlitFramebuffer");
 			if (result) {
 				srcFBO = tempFBO;
 			}
@@ -441,7 +428,7 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 		bool result = draw_->BlitFramebuffer(
 			srcFBO, srcX1, srcY1, srcX2, srcY2,
 			dst->fbo, dstX1, dstY1, dstX2, dstY2,
-			Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST);
+			Draw::FB_COLOR_BIT, Draw::FB_BLIT_NEAREST, "BlitFramebuffer");
 		if (!result) {
 			ERROR_LOG_REPORT(G3D, "fbo_blit_color failed in blit (%08x -> %08x)", src->fb_address, dst->fb_address);
 		}
@@ -627,7 +614,7 @@ static const D3DVERTEXELEMENT9 g_FramebufferVertexElements[] = {
 				w = vfb->width * maxRes;
 				h = vfb->height * maxRes;
 				tempFBO = draw_->CreateFramebuffer({ w, h, 1, 1, false, Draw::FBO_8888 });
-				if (draw_->BlitFramebuffer(vfb->fbo, 0, 0, vfb->renderWidth, vfb->renderHeight, tempFBO, 0, 0, w, h, Draw::FB_COLOR_BIT, g_Config.iBufFilter == SCALE_LINEAR ? Draw::FB_BLIT_LINEAR : Draw::FB_BLIT_NEAREST)) {
+				if (draw_->BlitFramebuffer(vfb->fbo, 0, 0, vfb->renderWidth, vfb->renderHeight, tempFBO, 0, 0, w, h, Draw::FB_COLOR_BIT, g_Config.iBufFilter == SCALE_LINEAR ? Draw::FB_BLIT_LINEAR : Draw::FB_BLIT_NEAREST, "GetFramebuffer")) {
 					renderTarget = (LPDIRECT3DSURFACE9)draw_->GetFramebufferAPITexture(tempFBO, Draw::FB_COLOR_BIT | Draw::FB_SURFACE_BIT, 0);
 				}
 			}

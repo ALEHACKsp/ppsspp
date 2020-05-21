@@ -260,7 +260,7 @@ void GLRenderManager::StopThread() {
 	}
 }
 
-void GLRenderManager::BindFramebufferAsRenderTarget(GLRFramebuffer *fb, GLRRenderPassAction color, GLRRenderPassAction depth, GLRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil) {
+void GLRenderManager::BindFramebufferAsRenderTarget(GLRFramebuffer *fb, GLRRenderPassAction color, GLRRenderPassAction depth, GLRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil, const char *tag) {
 	assert(insideFrame_);
 #ifdef _DEBUG
 	curProgram_ = nullptr;
@@ -269,6 +269,7 @@ void GLRenderManager::BindFramebufferAsRenderTarget(GLRFramebuffer *fb, GLRRende
 	if (steps_.size() && steps_.back()->render.framebuffer == fb && steps_.back()->stepType == GLRStepType::RENDER) {
 		if (color != GLRRenderPassAction::CLEAR && depth != GLRRenderPassAction::CLEAR && stencil != GLRRenderPassAction::CLEAR) {
 			// We don't move to a new step, this bind was unnecessary and we can safely skip it.
+			curRenderStep_ = steps_.back();
 			return;
 		}
 	}
@@ -279,7 +280,11 @@ void GLRenderManager::BindFramebufferAsRenderTarget(GLRFramebuffer *fb, GLRRende
 	GLRStep *step = new GLRStep{ GLRStepType::RENDER };
 	// This is what queues up new passes, and can end previous ones.
 	step->render.framebuffer = fb;
+	step->render.color = color;
+	step->render.depth = depth;
+	step->render.stencil = stencil;
 	step->render.numDraws = 0;
+	step->tag = tag;
 	steps_.push_back(step);
 
 	GLuint clearMask = 0;
@@ -308,6 +313,12 @@ void GLRenderManager::BindFramebufferAsRenderTarget(GLRFramebuffer *fb, GLRRende
 	}
 	curRenderStep_ = step;
 
+	if (fb) {
+		if (color == GLRRenderPassAction::KEEP || depth == GLRRenderPassAction::KEEP || stencil == GLRRenderPassAction::KEEP) {
+			step->dependencies.insert(fb);
+		}
+	}
+
 	// Every step clears this state.
 	gstate_c.Dirty(DIRTY_BLEND_STATE | DIRTY_DEPTHSTENCIL_STATE | DIRTY_RASTER_STATE);
 }
@@ -319,22 +330,28 @@ void GLRenderManager::BindFramebufferAsTexture(GLRFramebuffer *fb, int binding, 
 	data.bind_fb_texture.framebuffer = fb;
 	data.bind_fb_texture.aspect = aspectBit;
 	curRenderStep_->commands.push_back(data);
+	curRenderStep_->dependencies.insert(fb);
 }
 
-void GLRenderManager::CopyFramebuffer(GLRFramebuffer *src, GLRect2D srcRect, GLRFramebuffer *dst, GLOffset2D dstPos, int aspectMask) {
+void GLRenderManager::CopyFramebuffer(GLRFramebuffer *src, GLRect2D srcRect, GLRFramebuffer *dst, GLOffset2D dstPos, int aspectMask, const char *tag) {
 	GLRStep *step = new GLRStep{ GLRStepType::COPY };
 	step->copy.srcRect = srcRect;
 	step->copy.dstPos = dstPos;
 	step->copy.src = src;
 	step->copy.dst = dst;
 	step->copy.aspectMask = aspectMask;
+	step->dependencies.insert(src);
+	step->tag = tag;
+	bool fillsDst = dst && srcRect.x == 0 && srcRect.y == 0 && srcRect.w == dst->width && srcRect.h == dst->height;
+	if (dstPos.x != 0 || dstPos.y != 0 || !fillsDst)
+		step->dependencies.insert(dst);
 	steps_.push_back(step);
 
 	// Every step clears this state.
 	gstate_c.Dirty(DIRTY_BLEND_STATE | DIRTY_DEPTHSTENCIL_STATE | DIRTY_RASTER_STATE);
 }
 
-void GLRenderManager::BlitFramebuffer(GLRFramebuffer *src, GLRect2D srcRect, GLRFramebuffer *dst, GLRect2D dstRect, int aspectMask, bool filter) {
+void GLRenderManager::BlitFramebuffer(GLRFramebuffer *src, GLRect2D srcRect, GLRFramebuffer *dst, GLRect2D dstRect, int aspectMask, bool filter, const char *tag) {
 	GLRStep *step = new GLRStep{ GLRStepType::BLIT };
 	step->blit.srcRect = srcRect;
 	step->blit.dstRect = dstRect;
@@ -342,13 +359,18 @@ void GLRenderManager::BlitFramebuffer(GLRFramebuffer *src, GLRect2D srcRect, GLR
 	step->blit.dst = dst;
 	step->blit.aspectMask = aspectMask;
 	step->blit.filter = filter;
+	step->dependencies.insert(src);
+	step->tag = tag;
+	bool fillsDst = dst && dstRect.x == 0 && dstRect.y == 0 && dstRect.w == dst->width && dstRect.h == dst->height;
+	if (!fillsDst)
+		step->dependencies.insert(dst);
 	steps_.push_back(step);
 
 	// Every step clears this state.
 	gstate_c.Dirty(DIRTY_BLEND_STATE | DIRTY_DEPTHSTENCIL_STATE | DIRTY_RASTER_STATE);
 }
 
-bool GLRenderManager::CopyFramebufferToMemorySync(GLRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
+bool GLRenderManager::CopyFramebufferToMemorySync(GLRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag) {
 	_assert_(pixels);
 
 	GLRStep *step = new GLRStep{ GLRStepType::READBACK };
@@ -356,6 +378,8 @@ bool GLRenderManager::CopyFramebufferToMemorySync(GLRFramebuffer *src, int aspec
 	step->readback.srcRect = { x, y, w, h };
 	step->readback.aspectMask = aspectBits;
 	step->readback.dstFormat = destFormat;
+	step->dependencies.insert(src);
+	step->tag = tag;
 	steps_.push_back(step);
 
 	// Every step clears this state.
@@ -380,13 +404,14 @@ bool GLRenderManager::CopyFramebufferToMemorySync(GLRFramebuffer *src, int aspec
 	return true;
 }
 
-void GLRenderManager::CopyImageToMemorySync(GLRTexture *texture, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
+void GLRenderManager::CopyImageToMemorySync(GLRTexture *texture, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag) {
 	_assert_(texture);
 	_assert_(pixels);
 	GLRStep *step = new GLRStep{ GLRStepType::READBACK_IMAGE };
 	step->readback_image.texture = texture;
 	step->readback_image.mipLevel = mipLevel;
 	step->readback_image.srcRect = { x, y, w, h };
+	step->tag = tag;
 	steps_.push_back(step);
 
 	// Every step clears this state.

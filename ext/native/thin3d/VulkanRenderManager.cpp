@@ -454,13 +454,25 @@ VkCommandBuffer VulkanRenderManager::GetInitCmd() {
 	return frameData_[curFrame].initCmd;
 }
 
-void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRRenderPassAction color, VKRRenderPassAction depth, VKRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil) {
+void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRRenderPassAction color, VKRRenderPassAction depth, VKRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil, const char *tag) {
 	assert(insideFrame_);
 	// Eliminate dupes.
-	if (steps_.size() && steps_.back()->render.framebuffer == fb && steps_.back()->stepType == VKRStepType::RENDER) {
+	if (!steps_.empty() && steps_.back()->stepType == VKRStepType::RENDER && steps_.back()->render.framebuffer == fb) {
 		if (color != VKRRenderPassAction::CLEAR && depth != VKRRenderPassAction::CLEAR && stencil != VKRRenderPassAction::CLEAR) {
 			// We don't move to a new step, this bind was unnecessary and we can safely skip it.
 			// Not sure how much this is still happening but probably worth checking for nevertheless.
+			curRenderStep_ = steps_.back();
+			curStepHasViewport_ = false;
+			curStepHasScissor_ = false;
+			for (const auto &c : steps_.back()->commands) {
+				if (c.cmd == VKRRenderCommand::VIEWPORT) {
+					curStepHasViewport_ = true;
+					break;
+				} else if (c.cmd == VKRRenderCommand::SCISSOR) {
+					curStepHasScissor_ = true;
+					break;
+				}
+			}
 			return;
 		}
 	}
@@ -488,9 +500,19 @@ void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRR
 	step->render.numDraws = 0;
 	step->render.numReads = 0;
 	step->render.finalColorLayout = !fb ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+	step->tag = tag;
 	steps_.push_back(step);
 
+	if (fb) {
+		// If there's a KEEP, we naturally read from the framebuffer.
+		if (color == VKRRenderPassAction::KEEP || depth == VKRRenderPassAction::KEEP || stencil == VKRRenderPassAction::KEEP) {
+			step->dependencies.insert(fb);
+		}
+	}
+
 	curRenderStep_ = step;
+	curStepHasViewport_ = false;
+	curStepHasScissor_ = false;
 	if (fb) {
 		curWidth_ = fb->width;
 		curHeight_ = fb->height;
@@ -500,7 +522,8 @@ void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRR
 	}
 }
 
-bool VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
+bool VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag) {
+	assert(insideFrame_);
 	for (int i = (int)steps_.size() - 1; i >= 0; i--) {
 		if (steps_[i]->stepType == VKRStepType::RENDER && steps_[i]->render.framebuffer == src) {
 			steps_[i]->render.numReads++;
@@ -513,6 +536,8 @@ bool VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int a
 	step->readback.src = src;
 	step->readback.srcRect.offset = { x, y };
 	step->readback.srcRect.extent = { (uint32_t)w, (uint32_t)h };
+	step->dependencies.insert(src);
+	step->tag = tag;
 	steps_.push_back(step);
 
 	curRenderStep_ = nullptr;
@@ -559,12 +584,14 @@ bool VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int a
 	return true;
 }
 
-void VulkanRenderManager::CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
+void VulkanRenderManager::CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag) {
+	assert(insideFrame_);
 	VKRStep *step = new VKRStep{ VKRStepType::READBACK_IMAGE };
 	step->readback_image.image = image;
 	step->readback_image.srcRect.offset = { x, y };
 	step->readback_image.srcRect.extent = { (uint32_t)w, (uint32_t)h };
 	step->readback_image.mipLevel = mipLevel;
+	step->tag = tag;
 	steps_.push_back(step);
 
 	curRenderStep_ = nullptr;
@@ -782,7 +809,7 @@ void VulkanRenderManager::Clear(uint32_t clearColor, float clearZ, int clearSten
 	}
 }
 
-void VulkanRenderManager::CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkOffset2D dstPos, int aspectMask) {
+void VulkanRenderManager::CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkOffset2D dstPos, int aspectMask, const char *tag) {
 	_dbg_assert_msg_(G3D, srcRect.offset.x >= 0, "srcrect offset x (%d) < 0", srcRect.offset.x);
 	_dbg_assert_msg_(G3D, srcRect.offset.y >= 0, "srcrect offset y (%d) < 0", srcRect.offset.y);
 	_dbg_assert_msg_(G3D, srcRect.offset.x + srcRect.extent.width <= (uint32_t)src->width, "srcrect offset x (%d) + extent (%d) > width (%d)", srcRect.offset.x, srcRect.extent.width, (uint32_t)src->width);
@@ -821,13 +848,18 @@ void VulkanRenderManager::CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect,
 	step->copy.srcRect = srcRect;
 	step->copy.dst = dst;
 	step->copy.dstPos = dstPos;
+	step->dependencies.insert(src);
+	step->tag = tag;
+	bool fillsDst = dst && srcRect.offset.x == 0 && srcRect.offset.y == 0 && srcRect.extent.width == dst->width && srcRect.extent.height == dst->height;
+	if (dstPos.x != 0 || dstPos.y != 0 || !fillsDst)
+		step->dependencies.insert(dst);
 
 	std::unique_lock<std::mutex> lock(mutex_);
 	steps_.push_back(step);
 	curRenderStep_ = nullptr;
 }
 
-void VulkanRenderManager::BlitFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkRect2D dstRect, int aspectMask, VkFilter filter) {
+void VulkanRenderManager::BlitFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkRect2D dstRect, int aspectMask, VkFilter filter, const char *tag) {
 	_dbg_assert_msg_(G3D, srcRect.offset.x >= 0, "srcrect offset x (%d) < 0", srcRect.offset.x);
 	_dbg_assert_msg_(G3D, srcRect.offset.y >= 0, "srcrect offset y (%d) < 0", srcRect.offset.y);
 	_dbg_assert_msg_(G3D, srcRect.offset.x + srcRect.extent.width <= (uint32_t)src->width, "srcrect offset x (%d) + extent (%d) > width (%d)", srcRect.offset.x, srcRect.extent.width, (uint32_t)src->width);
@@ -859,6 +891,11 @@ void VulkanRenderManager::BlitFramebuffer(VKRFramebuffer *src, VkRect2D srcRect,
 	step->blit.dst = dst;
 	step->blit.dstRect = dstRect;
 	step->blit.filter = filter;
+	step->dependencies.insert(src);
+	step->tag = tag;
+	bool fillsDst = dst && dstRect.offset.x == 0 && dstRect.offset.y == 0 && dstRect.extent.width == dst->width && dstRect.extent.height == dst->height;
+	if (!fillsDst)
+		step->dependencies.insert(dst);
 
 	std::unique_lock<std::mutex> lock(mutex_);
 	steps_.push_back(step);

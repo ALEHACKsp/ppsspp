@@ -58,7 +58,7 @@ public:
 
 	void BlitFramebufferDepth(VirtualFramebuffer *src, VirtualFramebuffer *dst) override;
 
-	bool NotifyStencilUpload(u32 addr, int size, bool skipZero = false) override;
+	bool NotifyStencilUpload(u32 addr, int size, StencilUpload flags = StencilUpload::NEEDS_CLEAR) override;
 
 	VkImageView BindFramebufferAsColorTexture(int stage, VirtualFramebuffer *framebuffer, int flags);
 
@@ -71,7 +71,6 @@ protected:
 
 	// Used by ReadFramebufferToMemory and later framebuffer block copies
 	void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp) override;
-	bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
 	void UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
 
 private:
@@ -85,7 +84,6 @@ private:
 	TextureCacheVulkan *textureCacheVulkan_ = nullptr;
 	ShaderManagerVulkan *shaderManagerVulkan_ = nullptr;
 	DrawEngineVulkan *drawEngineVulkan_ = nullptr;
-	VulkanDeviceAllocator *allocator_ = nullptr;
 	VulkanPushBuffer *push_;
 
 	enum {

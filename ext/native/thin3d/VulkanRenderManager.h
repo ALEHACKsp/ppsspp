@@ -105,13 +105,13 @@ public:
 	// Zaps queued up commands. Use if you know there's a risk you've queued up stuff that has already been deleted. Can happen during in-game shutdown.
 	void Wipe();
 
-	void BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRRenderPassAction color, VKRRenderPassAction depth, VKRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil);
+	void BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRRenderPassAction color, VKRRenderPassAction depth, VKRRenderPassAction stencil, uint32_t clearColor, float clearDepth, uint8_t clearStencil, const char *tag);
 	VkImageView BindFramebufferAsTexture(VKRFramebuffer *fb, int binding, int aspectBit, int attachment);
-	bool CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride);
-	void CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride);
+	bool CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag);
+	void CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, const char *tag);
 
-	void CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkOffset2D dstPos, int aspectMask);
-	void BlitFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkRect2D dstRect, int aspectMask, VkFilter filter);
+	void CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkOffset2D dstPos, int aspectMask, const char *tag);
+	void BlitFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkRect2D dstRect, int aspectMask, VkFilter filter, const char *tag);
 
 	void BindPipeline(VkPipeline pipeline) {
 		_dbg_assert_(G3D, curRenderStep_ && curRenderStep_->stepType == VKRStepType::RENDER);
@@ -136,6 +136,7 @@ public:
 		data.viewport.vp.minDepth = clamp_value(vp.minDepth, 0.0f, 1.0f);
 		data.viewport.vp.maxDepth = clamp_value(vp.maxDepth, 0.0f, 1.0f);
 		curRenderStep_->commands.push_back(data);
+		curStepHasViewport_ = true;
 	}
 
 	void SetScissor(const VkRect2D &rc) {
@@ -145,6 +146,7 @@ public:
 		VkRenderData data{ VKRRenderCommand::SCISSOR };
 		data.scissor.scissor = rc;
 		curRenderStep_->commands.push_back(data);
+		curStepHasScissor_ = true;
 	}
 
 	void SetStencilParams(uint8_t writeMask, uint8_t compareMask, uint8_t refValue) {
@@ -178,7 +180,7 @@ public:
 	void Clear(uint32_t clearColor, float clearZ, int clearStencil, int clearMask);
 
 	void Draw(VkPipelineLayout layout, VkDescriptorSet descSet, int numUboOffsets, const uint32_t *uboOffsets, VkBuffer vbuffer, int voffset, int count, int offset = 0) {
-		_dbg_assert_(G3D, curRenderStep_ && curRenderStep_->stepType == VKRStepType::RENDER);
+		_dbg_assert_(G3D, curRenderStep_ && curRenderStep_->stepType == VKRStepType::RENDER && curStepHasViewport_ && curStepHasScissor_);
 		VkRenderData data{ VKRRenderCommand::DRAW };
 		data.draw.count = count;
 		data.draw.offset = offset;
@@ -195,7 +197,7 @@ public:
 	}
 
 	void DrawIndexed(VkPipelineLayout layout, VkDescriptorSet descSet, int numUboOffsets, const uint32_t *uboOffsets, VkBuffer vbuffer, int voffset, VkBuffer ibuffer, int ioffset, int count, int numInstances, VkIndexType indexType) {
-		_dbg_assert_(G3D, curRenderStep_ && curRenderStep_->stepType == VKRStepType::RENDER);
+		_dbg_assert_(G3D, curRenderStep_ && curRenderStep_->stepType == VKRStepType::RENDER && curStepHasViewport_ && curStepHasScissor_);
 		VkRenderData data{ VKRRenderCommand::DRAW_INDEXED };
 		data.drawIndexed.count = count;
 		data.drawIndexed.instances = numInstances;
@@ -315,6 +317,8 @@ private:
 	int curHeight_ = -1;
 	bool insideFrame_ = false;
 	VKRStep *curRenderStep_ = nullptr;
+	bool curStepHasViewport_ = false;
+	bool curStepHasScissor_ = false;
 	std::vector<VKRStep *> steps_;
 	bool splitSubmit_ = false;
 

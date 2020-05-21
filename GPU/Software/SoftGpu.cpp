@@ -257,7 +257,7 @@ void SoftGPU::CopyToCurrentFboFromDisplayRam(int srcwidth, int srcheight) {
 		u1 = 1.0f;
 	}
 	if (!hasImage) {
-		draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::CLEAR, Draw::RPAction::DONT_CARE, Draw::RPAction::DONT_CARE });
+		draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::CLEAR, Draw::RPAction::DONT_CARE, Draw::RPAction::DONT_CARE }, "CopyToCurrentFboFromDisplayRam");
 		return;
 	}
 
@@ -275,10 +275,8 @@ void SoftGPU::CopyToCurrentFboFromDisplayRam(int srcwidth, int srcheight) {
 		break;
 	}
 
-	PostShaderUniforms uniforms{};
-	presentation_->CalculatePostShaderUniforms(desc.width, desc.height, false, &uniforms);
-	presentation_->SourceTexture(fbTex);
-	presentation_->CopyToOutput(outputFlags, g_Config.iInternalScreenRotation, u0, v0, u1, v1, uniforms);
+	presentation_->SourceTexture(fbTex, desc.width, desc.height);
+	presentation_->CopyToOutput(outputFlags, g_Config.iInternalScreenRotation, u0, v0, u1, v1);
 }
 
 void SoftGPU::CopyDisplayToOutput(bool reallyDirty) {

@@ -335,6 +335,7 @@ public:
 		ANY_MAP_BUFFER_RANGE_SLOW = 2,
 		PVR_GENMIPMAP_HEIGHT_GREATER = 3,
 		BROKEN_NAN_IN_CONDITIONAL = 4,
+		COLORWRITEMASK_BROKEN_WITH_DEPTHTEST = 5,
 	};
 
 protected:
@@ -552,6 +553,7 @@ struct RenderPassInfo {
 	uint32_t clearColor;
 	float clearDepth;
 	uint8_t clearStencil;
+	const char *tag;
 };
 
 class DrawContext {
@@ -595,9 +597,9 @@ public:
 	// Copies data from the CPU over into the buffer, at a specific offset. This does not change the size of the buffer and cannot write outside it.
 	virtual void UpdateBuffer(Buffer *buffer, const uint8_t *data, size_t offset, size_t size, UpdateBufferFlags flags) = 0;
 
-	virtual void CopyFramebufferImage(Framebuffer *src, int level, int x, int y, int z, Framebuffer *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBits) = 0;
-	virtual bool BlitFramebuffer(Framebuffer *src, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter) = 0;
-	virtual bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride) {
+	virtual void CopyFramebufferImage(Framebuffer *src, int level, int x, int y, int z, Framebuffer *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBits, const char *tag) = 0;
+	virtual bool BlitFramebuffer(Framebuffer *src, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter, const char *tag) = 0;
+	virtual bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride, const char *tag) {
 		return false;
 	}
 	virtual DataFormat PreferredFramebufferReadbackFormat(Framebuffer *src) {
@@ -606,7 +608,7 @@ public:
 
 	// These functions should be self explanatory.
 	// Binding a zero render target means binding the backbuffer.
-	virtual void BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp) = 0;
+	virtual void BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp, const char *tag) = 0;
 
 	// color must be 0, for now.
 	virtual void BindFramebufferAsTexture(Framebuffer *fbo, int binding, FBChannel channelBit, int attachment) = 0;
@@ -644,9 +646,8 @@ public:
 	// Call this with 0 to signal that you have been drawing on your own, and need the state reset on the next pipeline bind.
 	virtual void BindPipeline(Pipeline *pipeline) = 0;
 
-	// TODO: Add more sophisticated draws with buffer offsets, and multidraws.
 	virtual void Draw(int vertexCount, int offset) = 0;
-	virtual void DrawIndexed(int vertexCount, int offset) = 0;
+	virtual void DrawIndexed(int vertexCount, int offset) = 0;  // Always 16-bit indices.
 	virtual void DrawUP(const void *vdata, int vertexCount) = 0;
 	
 	// Frame management (for the purposes of sync and resource management, necessary with modern APIs). Default implementations here.
@@ -665,7 +666,7 @@ public:
 	}
 
 	virtual std::string GetInfoString(InfoField info) const = 0;
-	virtual uintptr_t GetNativeObject(NativeObject obj) = 0;
+	virtual uint64_t GetNativeObject(NativeObject obj) = 0;
 
 	virtual void HandleEvent(Event ev, int width, int height, void *param1 = nullptr, void *param2 = nullptr) = 0;
 

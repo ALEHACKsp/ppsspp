@@ -456,6 +456,12 @@ static ConfigSetting generalSettings[] = {
 	ConfigSetting("GridView2", &g_Config.bGridView2, true),
 	ConfigSetting("GridView3", &g_Config.bGridView3, false),
 	ConfigSetting("ComboMode", &g_Config.iComboMode, 0),
+	ConfigSetting("RightAnalogUp", &g_Config.iRightAnalogUp, 0),
+	ConfigSetting("RightAnalogDown", &g_Config.iRightAnalogDown, 0),
+	ConfigSetting("RightAnalogLeft", &g_Config.iRightAnalogLeft, 0),
+	ConfigSetting("RightAnalogRight", &g_Config.iRightAnalogRight, 0),
+	ConfigSetting("RightAnalogPress", &g_Config.iRightAnalogPress, 0),
+	ConfigSetting("RightAnalogCustom", &g_Config.bRightAnalogCustom, false),
 
 	// "default" means let emulator decide, "" means disable.
 	ConfigSetting("ReportingHost", &g_Config.sReportHost, "default"),
@@ -786,7 +792,6 @@ static ConfigSetting soundSettings[] = {
 	ConfigSetting("Enable", &g_Config.bEnableSound, true, true, true),
 	ConfigSetting("AudioBackend", &g_Config.iAudioBackend, 0, true, true),
 	ConfigSetting("ExtraAudioBuffering", &g_Config.bExtraAudioBuffering, false, true, false),
-	ConfigSetting("AudioResampler", &g_Config.bAudioResampler, true, true, true),
 	ConfigSetting("GlobalVolume", &g_Config.iGlobalVolume, VOLUME_MAX, true, true),
 	ConfigSetting("AltSpeedVolume", &g_Config.iAltSpeedVolume, -1, true, true),
 	ConfigSetting("AudioDevice", &g_Config.sAudioDevice, "", true, false),
@@ -1190,6 +1195,12 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
 		}
 	}
 
+	auto postShaderSetting = iniFile.GetOrCreateSection("PostShaderSetting")->ToMap();
+	mPostShaderSetting.clear();
+	for (auto it : postShaderSetting) {
+		mPostShaderSetting[it.first] = std::stof(it.second);
+	}
+
 	// This caps the exponent 4 (so 16x.)
 	if (iAnisotropyLevel > 4) {
 		iAnisotropyLevel = 4;
@@ -1299,6 +1310,14 @@ void Config::Save(const char *saveReason) {
 			char keyName[64];
 			snprintf(keyName, sizeof(keyName), "Path%d", (int)i);
 			pinnedPaths->Set(keyName, vPinnedPaths[i]);
+		}
+
+		if (!bGameSpecific) {
+			IniFile::Section *postShaderSetting = iniFile.GetOrCreateSection("PostShaderSetting");
+			postShaderSetting->Clear();
+			for (auto it = mPostShaderSetting.begin(), end = mPostShaderSetting.end(); it != end; ++it) {
+				postShaderSetting->Set(it->first.c_str(), it->second);
+			}
 		}
 
 		IniFile::Section *control = iniFile.GetOrCreateSection("Control");
@@ -1551,6 +1570,12 @@ bool Config::saveGameConfig(const std::string &pGameId, const std::string &title
 		}
 	});
 
+	IniFile::Section *postShaderSetting = iniFile.GetOrCreateSection("PostShaderSetting");
+	postShaderSetting->Clear();
+	for (auto it = mPostShaderSetting.begin(), end = mPostShaderSetting.end(); it != end; ++it) {
+		postShaderSetting->Set(it->first.c_str(), it->second);
+	}
+
 	KeyMap::SaveToIni(iniFile);
 	iniFile.Save(fullIniFilePath);
 
@@ -1568,6 +1593,12 @@ bool Config::loadGameConfig(const std::string &pGameId, const std::string &title
 	changeGameSpecific(pGameId, title);
 	IniFile iniFile;
 	iniFile.Load(iniFileNameFull);
+
+	auto postShaderSetting = iniFile.GetOrCreateSection("PostShaderSetting")->ToMap();
+	mPostShaderSetting.clear();
+	for (auto it : postShaderSetting) {
+		mPostShaderSetting[it.first] = std::stof(it.second);
+	}
 
 	IterateSettings(iniFile, [](IniFile::Section *section, ConfigSetting *setting) {
 		if (setting->perGame_) {
@@ -1592,6 +1623,12 @@ void Config::unloadGameConfig() {
 				setting->Get(section);
 			}
 		});
+
+		auto postShaderSetting = iniFile.GetOrCreateSection("PostShaderSetting")->ToMap();
+		mPostShaderSetting.clear();
+		for (auto it : postShaderSetting) {
+			mPostShaderSetting[it.first] = std::stof(it.second);
+		}
 
 		LoadStandardControllerIni();
 	}

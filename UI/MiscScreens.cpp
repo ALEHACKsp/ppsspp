@@ -306,6 +306,8 @@ PostProcScreen::PostProcScreen(const std::string &title) : ListPopupScreen(title
 	std::vector<std::string> items;
 	int selected = -1;
 	for (int i = 0; i < (int)shaders_.size(); i++) {
+		if (!shaders_[i].visible)
+			continue;
 		if (shaders_[i].section == g_Config.sPostShaderName)
 			selected = i;
 		items.push_back(ps->T(shaders_[i].section.c_str(), shaders_[i].name.c_str()));
@@ -514,6 +516,9 @@ void LogoScreen::render() {
 #if (defined(_WIN32) && !PPSSPP_PLATFORM(UWP)) || PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(LINUX)
 	// Draw the graphics API, except on UWP where it's always D3D11
 	std::string apiName = screenManager()->getDrawContext()->GetInfoString(InfoField::APINAME);
+#ifdef _DEBUG
+	apiName += ", debug build";
+#endif
 	dc.DrawText(gr->T(apiName), bounds.centerX(), ppsspp_org_y + 50, textColor, ALIGN_CENTER);
 #endif
 
